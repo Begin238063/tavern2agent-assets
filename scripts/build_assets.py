@@ -39,7 +39,15 @@ import datetime
 import hashlib
 import json
 import re
+import sys
+import io
 from pathlib import Path
+
+# 强制 UTF-8 输出（Windows 默认 GBK 会导致中文乱码）
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import _mini_yaml
 
@@ -137,8 +145,9 @@ def _note_of(comment: str, constant: bool, selective: bool, enabled: bool) -> st
         parts.append("常驻条目")
     if selective:
         parts.append("选择性条目")
+    # disabled 条目的 note 留空，由人工填写处置说明
     if not enabled:
-        parts.append("disabled（原卡禁用，仍保留，勿默认丢弃；请在此记录去向）")
+        return ""  # 空字符串，验证脚本会要求补全
     return "；".join(parts)
 
 
@@ -251,7 +260,48 @@ def _render_lore(key_name: str, idx: int, machine: dict, manual: dict) -> str:
     return "\n".join(lines)
 
 
-def _manual_defaults(entry: dict) -> dict:
+def _infer_layer(entry: dict, filename: str) -> str:
+    """推断 layer 默认值（首次生成时）。
+
+    layer 是路由载体：
+    - behavior: roleplay 逻辑、格式约束、变量更新规则
+    - identity: 角色核心设定、世界观总纲、初始化变量
+    - narrative: 剧情大纲、角色/地点/物品百科（默认）
+    """
+    comment = (entry.get("comment") or "").lower()
+    filename_lower = filename.lower()
+
+    # behavior: roleplay 指令、MVU 变量系统
+    behavior_patterns = [
+        "角色扮演", "roleplay", "注意事项", "系统指令",
+        "mvu_update", "mvu_plot", "变量更新", "变量格式", "变量禁词",
+        "变量输出", "变量防呆", "行动选项", "cg插图", "守岸人"
+    ]
+    for pattern in behavior_patterns:
+        if pattern in comment or pattern in filename_lower:
+            return "behavior"
+
+    # identity: 角色核心、世界观、初始化
+    identity_patterns = [
+        "世界观总纲", "主角自设", "用户名变量", "角色核心",
+        "initvar", "opening", "勿关", "勿开", "默认变量",
+        "i.r.i.s", "iris"
+    ]
+    # 特殊：角色同名条目（如"清宵.yaml"）通常是核心档案
+    if entry.get("constant") and len(entry.get("keys") or []) == 1:
+        only_key = (entry.get("keys") or [""])[0]
+        if only_key and filename.startswith(only_key.lower()):
+            return "identity"
+
+    for pattern in identity_patterns:
+        if pattern in comment or pattern in filename_lower:
+            return "identity"
+
+    # 默认：narrative（剧情、百科）
+    return "narrative"
+
+
+def _manual_defaults(entry: dict, filename: str = "") -> dict:
     """首次生成时的人工字段初值（此后视为人工所有，--migrate 原样保留）。"""
     constant = bool(entry.get("constant", False))
     selective = bool(entry.get("selective", False))
@@ -259,7 +309,7 @@ def _manual_defaults(entry: dict) -> dict:
     return {
         "keys": [str(k) for k in (entry.get("keys") or [])],
         "note": _note_of(entry.get("comment") or "", constant, selective, enabled),
-        "layer": "",  # 待填：layer 是唯一路由载体（承重），取值必填，不默认 narrative
+        "layer": _infer_layer(entry, filename),  # 首次生成时自动推断
         "budget_tokens": entry.get("token_budget") or None,
     }
 
@@ -295,7 +345,7 @@ def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str) -> list
         used_names.add(key_name)
 
         machine = _machine_fields(entry, idx, sha256)
-        manual = _manual_defaults(entry)
+        manual = _manual_defaults(entry, key_name)
         content = _render_lore(key_name, idx, machine, manual)
 
         path = lore_dir / f"{key_name}.yaml"
@@ -353,8 +403,8 @@ def migrate_lorebook(card: dict, lore_dir: Path, sha256: str) -> list:
                 "keys": old.get("keys") if old.get("keys") is not None
                         else [str(k) for k in (entry.get("keys") or [])],
                 "note": old.get("note") if old.get("note") is not None
-                        else _manual_defaults(entry)["note"],
-                "layer": old.get("layer") or "",  # 保留人工 layer；缺失保持待填
+                        else _manual_defaults(entry, key_name)["note"],
+                "layer": old.get("layer") or _infer_layer(entry, key_name),  # 保留人工 layer；空则推断
                 "budget_tokens": old.get("budget_tokens")
                         if old.get("budget_tokens") is not None
                         else (entry.get("token_budget") or None),
@@ -363,7 +413,7 @@ def migrate_lorebook(card: dict, lore_dir: Path, sha256: str) -> list:
             status = "迁移"
         else:
             key_name = _entry_key_name(entry, idx)
-            manual = _manual_defaults(entry)
+            manual = _manual_defaults(entry, key_name)
             path = lore_dir / f"{key_name}.yaml"
             status = "新建"
         content = _render_lore(key_name, idx, machine, manual)

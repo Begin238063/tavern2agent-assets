@@ -4,6 +4,7 @@
 
 用法：
     python3 scripts/validate_assets.py characters/<角色名>/ [--budget-tokens N] [--strict]
+    python3 scripts/validate_assets.py characters/<角色名>/ --level archival  # 归档级验证
     python3 scripts/validate_assets.py characters/<角色名>/ --report-unlayered   # 只输出未分层工作清单
 
 核心设计（layer 是唯一的路由载体）：
@@ -37,7 +38,14 @@
 import argparse
 import re
 import sys
+import io
 from pathlib import Path
+
+# 强制 UTF-8 输出（Windows 默认 GBK 会导致中文乱码）
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 import _mini_yaml
 from build_assets import _note_of
@@ -196,7 +204,7 @@ def _asset_config(asset_dir: Path) -> dict:
 
 
 def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
-                budget_tokens, strict: bool) -> tuple:
+                budget_tokens, strict: bool, level: str = "platform") -> tuple:
     """逐条检查 lore/*.yaml 的路由门禁；返回 (检查数, resident_tokens)。
 
     resident_tokens = persona 常驻部分 estimated_tokens
@@ -232,15 +240,15 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
         comment = _mini_yaml.get(d, "comment", "") or ""
         content = _mini_yaml.get(d, "content", "") or ""
 
-        # 1) layer 缺失/为空=未分层：不逐文件报错，由未分层清单统一呈现（末尾汇总）
+        # 1) layer 缺失/为空=未分层：仅 platform 级别报错
         # 2) layer 不在词表 → 错误（承重字段）
         if enabled and layer and layer not in LAYERS:
             errors.append(f"lore layer 取值非法：{label} —— {layer!r}（应为 identity/behavior/narrative）")
         # 3) 常驻预算：resident_tokens
         if enabled and layer in ("identity", "behavior"):
             resident += est(content)
-        # 4) disabled 处置
-        if disabled:
+        # 4) disabled 处置（仅 platform 级别要求）
+        if level == "platform" and disabled:
             default_note = _note_of(_mini_yaml.get(d, "comment", "") or "",
                                     bool(_mini_yaml.get(d, "constant", False)),
                                     selective, enabled)
@@ -279,13 +287,15 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
                 "机器不动它，但强制人做决定"
             )
 
-    if unlayered_groups:
+    # 未分层检查：仅 platform 级别报错
+    if level == "platform" and unlayered_groups:
         n = sum(len(v) for v in unlayered_groups.values())
         errors.append(
             f"lore 路由未分层：{n} 条 enabled 条目缺 layer（见文件末尾工作清单；"
             "逐条判 identity/behavior/narrative 即可，比编造触发键便宜得多）"
         )
-    if budget_tokens is not None and resident > budget_tokens:
+    # 预算检查：仅 platform 级别报错
+    if level == "platform" and budget_tokens is not None and resident > budget_tokens:
         errors.append(
             f"常驻预算超限：resident_tokens（persona 常驻 + enabled 且 layer ∈ {{identity, behavior}} 层）"
             f"共约 {resident} estimated_tokens > 预算 {budget_tokens}"
@@ -297,7 +307,7 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
 
 
 def validate(asset_dir: Path, budget_tokens=None, strict: bool = False,
-             report_unlayered: bool = False) -> int:
+             level: str = "platform", report_unlayered: bool = False) -> int:
     errors = []
     warnings = []
     infos = []
@@ -328,13 +338,14 @@ def validate(asset_dir: Path, budget_tokens=None, strict: bool = False,
                 if not any(re.match(rf"^  {re.escape(sub)}:", ln) for ln in lines):
                     errors.append(f"persona.yaml 缺少 {top}.{sub}")
 
-    # A2) 语义补全门禁
-    for (top, sub), label in NON_EMPTY.items():
-        line = next((ln for ln in lines if re.match(rf"^  {re.escape(sub)}:", ln)), None)
-        if line is None:
-            errors.append(f"缺少 {top}.{sub}")
-        elif not _scalar(line):
-            errors.append(f"资产未完成语义补全：{label}（当前为空占位，请人工/LLM 填写）")
+    # A2) 语义补全门禁（仅 platform 级别检查）
+    if level == "platform":
+        for (top, sub), label in NON_EMPTY.items():
+            line = next((ln for ln in lines if re.match(rf"^  {re.escape(sub)}:", ln)), None)
+            if line is None:
+                errors.append(f"缺少 {top}.{sub}")
+            elif not _scalar(line):
+                errors.append(f"资产未完成语义补全：{label}（当前为空占位，请人工/LLM 填写）")
 
     # A3) refs 文件存在性
     for key in ("lore_refs", "dialogs_refs"):
@@ -358,7 +369,7 @@ def validate(asset_dir: Path, budget_tokens=None, strict: bool = False,
             errors.append("provenance.md 未记录 persona.provenance.sha256")
 
     # B) lore 路由门禁
-    checked, resident = _lore_gates(asset_dir, errors, warnings, infos, budget_tokens, strict)
+    checked, resident = _lore_gates(asset_dir, errors, warnings, infos, budget_tokens, strict, level)
 
     for i in infos:
         print(f"ℹ {i}")
@@ -389,6 +400,8 @@ def main():
                     help="常驻预算上限（覆盖 validation.yaml；不传且无配置则跳过预算门禁）")
     ap.add_argument("--strict", action="store_true",
                     help="把警告升级为错误（keys 过泛 / 词表外取值 / narrative 过短 / 孤立条目）")
+    ap.add_argument("--level", choices=["archival", "platform"], default="platform",
+                    help="验证级别：archival=归档级（只检查机器字段），platform=平台级（检查所有字段，默认）")
     ap.add_argument("--report-unlayered", action="store_true",
                     help="只输出未分层条目工作清单并退出 0，不做其他检查")
     args = ap.parse_args()
@@ -397,7 +410,7 @@ def main():
         # 阈值属私有仓库决策：优先资产目录 validation.yaml，工具不内置默认值
         args.budget_tokens = _asset_config(asset_dir).get("budget_tokens")
     return validate(asset_dir, budget_tokens=args.budget_tokens,
-                    strict=args.strict, report_unlayered=args.report_unlayered)
+                    strict=args.strict, level=args.level, report_unlayered=args.report_unlayered)
 
 
 if __name__ == "__main__":

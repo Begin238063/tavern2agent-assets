@@ -11,6 +11,8 @@
 
 ## 用法
 
+### 基础流程
+
 ```bash
 python3 scripts/extract_card.py card.png cards/<角色名>/card.json   # ① 解包并归档
 python3 scripts/list_entries.py cards/<角色名>/card.json            # ② 世界书审计（可选 --filter mvu / initvar）
@@ -21,6 +23,36 @@ python3 scripts/validate_assets.py characters/<角色名>/             # ④ 完
 python3 scripts/replay_hitrate.py --lore characters/<角色名>/lore --chats 聊天记录.txt  # ⑤ keys 命中率回放（scan_depth 滑窗 + p50/p90/p99）
 python3 scripts/compile_card.py --assets characters/<角色名>/ --out out/card.json --resolve-refs  # ⑥（可选逃生口）编译回 ST 卡
 ```
+
+### 补全工作流（归档 → 平台部署）
+
+从 `build_assets.py` 生成的骨架到可部署资产，需要补全人工字段：
+
+```bash
+# 场景 A：归档级验证（只检查机器字段，适合初次拆卡）
+python3 scripts/validate_assets.py characters/<角色名>/ --level archival
+
+# 补全流程
+# 1. 补全 persona.yaml 的 5 个空字段
+#    - identity.codename: 角色代号/别称
+#    - identity.archetype: 角色原型/定位
+#    - style.tone: 语气基调
+#    - relationship.form: 关系形态
+#    - relationship.memory_policy: 记忆/好感策略
+
+# 2. 推断并填充空 layer 字段（自动）
+python3 scripts/infer_layers.py characters/<角色名>/
+
+# 3. 标记 disabled 条目的处置说明（自动）
+python3 scripts/mark_disabled.py characters/<角色名>/
+
+# 4. 平台级验证（检查所有字段，部署前必须通过）
+python3 scripts/validate_assets.py characters/<角色名>/ --level platform
+```
+
+**验证级别说明：**
+- `--level archival`（归档级）：只检查机器字段（_derived 块），适合初次拆卡、快速归档
+- `--level platform`（平台级，默认）：检查所有字段，包括人工补全的 persona/layer/note，部署前必须通过
 
 ## 目录结构
 
