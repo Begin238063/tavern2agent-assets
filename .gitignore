@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# 真实角色资产不进公开仓库：放独立私有仓库（tavern2-data/），由 pre-commit 机器拦截
+cards/
+characters/

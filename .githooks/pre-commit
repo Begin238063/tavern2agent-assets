@@ -1,0 +1,10 @@
+#!/bin/sh
+# 拦截真实角色资产路径：公开仓库只进工具/文档/schema/测试，不进任何卡数据
+staged=$(git diff --cached --name-only)
+if echo "$staged" | grep -qE '^(cards/|characters/)'; then
+  echo "✗ 禁止提交真实资产（cards/ 与 characters/）：真实资产应放在独立私有仓库" >&2
+  echo "   （命中：）" >&2
+  echo "$staged" | grep -E '^(cards/|characters/)' >&2
+  exit 1
+fi
+exit 0

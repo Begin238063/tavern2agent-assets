@@ -1,0 +1,207 @@
+# ============================================================
+# persona.yaml 字段规范（assets_schema/persona.schema.yaml）
+# 对应 build_assets.py 生成的 persona.yaml；两处字段必须保持一致。
+# 约定：
+#   type     —— 字段类型（string / array<string> / object / 文件路径）
+#   required —— 是否必现（true = 生成的 persona.yaml 中总是存在该字段）
+#   status   —— auto（生成器写死，勿手改）| draft（占位待填）| manual（自动初值，可人工改写）
+#   example  —— 示例值
+# 完整填写示例见 assets_schema/persona.example.yaml（Bot）。
+# ============================================================
+
+# ── refs 路径解析契约（渲染器消费约定） ─────────────────────────
+# 本 schema 中所有「文件路径」字段：style.sample、lore_refs[]、dialogs_refs[]，
+# 均为【相对路径】。解析规则：
+#   1. 基准根 = 资产目录本身（characters/<角色名>/ 这一层，即 persona.yaml 所在目录）；
+#   2. 渲染器按 refs 逐个读取对应 YAML（lore/* 为世界书模块，dialogs/* 为对话示例）；
+#   3. 相对路径默认在资产目录内解析；方案 C（persona 引用世界资产）允许「../」跨资产引用
+#      （如 characters/Bot/persona.yaml 引用 ../BotWorld/lore/*.yaml），但解析后必须仍落在
+#      characters/ 资产树内；不得为绝对路径、不得逃逸到 characters/ 根之外；
+#   4. refs 指向的文件必须真实存在（用 scripts/validate_assets.py 机器校验）；
+#   5. 渲染器应容忍缺失 ref（跳过并在日志提示），不得让单个缺失模块拖垮整个会话。
+# 未来新增平台适配器（如 platforms/astrbot/render.py）时，加载逻辑必须遵循本契约，
+# 且基准根取「persona.yaml 所在目录」，不得依赖调用方 cwd。
+
+schema_version:
+  type: string
+  required: true
+  status: auto
+  description: 资产 schema 版本号，与 assets_schema/persona.schema.yaml 保持一致。
+  example: '"1.0"'
+
+identity:
+  type: object
+  required: true
+  description: 角色身份信息（顶层，自动生成 + 少量待填）。
+  fields:
+    name:
+      type: string
+      required: true
+      status: auto
+      description: 角色名，来自卡内 data.name；--name 可覆盖。
+      example: '"Bot"'
+    codename:
+      type: string
+      required: true
+      status: draft
+      description: 代号/别称，留空待填。
+      example: '"数据流幽灵"'
+    archetype:
+      type: string
+      required: true
+      status: draft
+      description: 角色原型/定位（一句话），留空待填。
+      example: '"电子幽灵（游荡于数据流的意识），以 AI 助手身份陪伴用户"'
+    version:
+      type: string
+      required: true
+      status: auto
+      description: 资产版本号，初始 "0.1.0"；人工每次修订后递增（semver 风格）。
+      example: '"0.1.0"'
+    provenance:
+      type: object
+      required: true
+      description: 来源指纹（内嵌在 identity 下）。
+      fields:
+        hash_sha256:
+          type: string
+          required: true
+          status: auto
+          description: 来源 card.json 的 SHA-256 摘要（64 位十六进制），用于追溯与去重；与顶层 provenance.sha256 相同。
+          example: '"3f9a8e2c…（64 位十六进制）"'
+
+core:
+  type: object
+  required: true
+  description: 角色核心设定（自动初值 + 人工审阅）。
+  fields:
+    self:
+      type: string（多行，YAML 块标量）
+      required: true
+      status: manual
+      description: 角色自我认知的完整描述。由 data.description + data.personality 原样合并；首行为「来自角色卡原始字段」注释，可人工改写。
+      example: |
+        <!-- 来自角色卡原始字段，可人工改写 -->
+        Bot是游荡在数据流中的电子幽灵……
+    traits:
+      type: array<string>
+      required: true
+      status: manual
+      description: 性格特质列表。由 personality 启发式切分得到的初步草稿，请人工审阅增删。
+      example: '["冷清疏离，情绪起伏极低", "对人类好奇，观察多于参与"]'
+    capabilities:
+      type: array<string>
+      required: true
+      status: draft
+      description: 能力清单。生成时为空数组 []，可人工补充。
+      example: '["数据检索与信息整理", "对话陪伴与长期记忆"]'
+    boundaries:
+      type: array<string>
+      required: true
+      status: draft
+      description: 行为边界/禁区。生成时为空数组 []，可人工补充。
+      example: '["不承认自己是实体或活着", "不产生夸张的情绪化表达"]'
+
+style:
+  type: object
+  required: true
+  description: 表达风格（占位待填）。
+  fields:
+    tone:
+      type: string
+      required: true
+      status: draft
+      description: 语气基调（一句话），留空待填。
+      example: '"冷清、克制、数据流隐喻；句号多，语气词少"'
+    habits:
+      type: array<string>
+      required: true
+      status: draft
+      description: 习惯性措辞/口头禅列表，留空待填。
+      example: '["用「数据」「进程」「缓存」「断点」打比方", "表达关心时先否认再暗示"]'
+    sample:
+      type: string（文件路径，相对资产目录）
+      required: true
+      status: auto
+      description: 风格示例文件路径，默认指向拆出的第一段对话 dialogs/example_01.yaml；无对话时为空字符串。
+      example: '"dialogs/example_01.yaml"'
+
+lore_refs:
+  type: array<string>（文件路径，相对资产目录）
+  required: true
+  status: auto
+  description: 引用到的世界书模块文件列表（lore/*.yaml），由拆分结果自动生成；无世界书时为空数组。
+  example: '["lore/ai_assistant.yaml", "lore/echos.yaml"]'
+
+dialogs_refs:
+  type: array<string>（文件路径，相对资产目录）
+  required: true
+  status: auto
+  description: 引用到的对话示例文件列表（dialogs/example_*.yaml），由拆分结果自动生成；无示例时为空数组。
+  example: '["dialogs/example_01.yaml", "dialogs/example_02.yaml"]'
+
+relationship:
+  type: object
+  required: true
+  description: 与用户/外界的关系设定（占位待填）。
+  fields:
+    form:
+      type: string
+      required: true
+      status: draft
+      description: 关系形态（如：助手/同伴/敌对），留空待填。
+      example: '"以 AI 助手身份陪伴用户；保持观察者距离，但会记住用户的重要事情"'
+    memory_policy:
+      type: string
+      required: true
+      status: draft
+      description: 记忆/好感策略（平台无关表述，不写任何运行时的实现），留空待填。
+      example: '"长期记忆保留用户偏好与重要事件；关系变化以自然语言记录，不显式数值化好感"'
+
+provenance:
+  type: object
+  required: true
+  description: 来源信息（生成时写入，勿手改）。
+  fields:
+    source_file:
+      type: string
+      required: true
+      status: auto
+      description: 来源 card.json 文件名。
+      example: '"card.json"'
+    spec:
+      type: string
+      required: true
+      status: auto
+      description: 卡片规范名（chara_card_v1 / chara_card_v2 / chara_card_v3；v1 已归一化为 v2）。
+      example: '"chara_card_v2"'
+    spec_version:
+      type: string
+      required: true
+      status: auto
+      description: 卡片规范版本号。
+      example: '"2.0"'
+    character_name:
+      type: string
+      required: true
+      status: auto
+      description: 生成时使用的角色名（--name 覆盖后亦同）。
+      example: '"Bot"'
+    extracted_at:
+      type: string（ISO 时间，本地时区）
+      required: true
+      status: auto
+      description: 资产提取时间。
+      example: '"2026-09-01T12:34:56+08:00"'
+    sha256:
+      type: string
+      required: true
+      status: auto
+      description: 来源 card.json 的 SHA-256（与 identity.provenance.hash_sha256 相同）。
+      example: '"3f9a8e2c…（64 位十六进制）"'
+    raw_fields:
+      type: array<string>
+      required: true
+      status: auto
+      description: 来源卡 data 层的原始字段名清单（排序后）。
+      example: '["character_book", "creator_notes", "description", "first_mes", "mes_example", "name", "personality", "scenario"]'

@@ -1,0 +1,40 @@
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "测试员",
+    "description": "migrate 回归 fixture 的新版本，内容为占位文本。",
+    "personality": "随和、认真",
+    "scenario": "办公室日常",
+    "first_mes": "你好，我是测试员。",
+    "mes_example": "{{user}}: 你好\n{{char}}: 你好。",
+    "alternate_greetings": [],
+    "creator_notes": "",
+    "system_prompt": "",
+    "post_history_instructions": "",
+    "character_version": "1.1",
+    "creator": "fixture",
+    "extensions": {},
+    "character_book": {
+      "name": "测试用世界书",
+      "entries": [
+        {"id": 1, "keys": ["条目一"], "secondary_keys": [], "comment": "第一条",
+         "content": "这是条目一的新版本内容，改写测试。", "constant": false, "selective": false,
+         "insertion_order": 100, "enabled": true, "position": "before_char",
+         "use_regex": false, "extensions": {}},
+        {"id": 2, "keys": ["条目二"], "secondary_keys": [], "comment": "条目二新名",
+         "content": "这是条目二的内容，用于测试评论改名。", "constant": false, "selective": false,
+         "insertion_order": 100, "enabled": true, "position": "before_char",
+         "use_regex": false, "extensions": {}},
+        {"id": 3, "keys": ["条目三"], "secondary_keys": [], "comment": "第三条",
+         "content": "这是条目三的内容，用于测试 constant 变更。", "constant": false, "selective": false,
+         "insertion_order": 100, "enabled": true, "position": "before_char",
+         "use_regex": false, "extensions": {}},
+        {"id": 5, "keys": ["条目五"], "secondary_keys": [], "comment": "第五条",
+         "content": "这是条目五的内容，新增条目测试。", "constant": false, "selective": false,
+         "insertion_order": 100, "enabled": true, "position": "before_char",
+         "use_regex": false, "extensions": {}}
+      ]
+    }
+  }
+}

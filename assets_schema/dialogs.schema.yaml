@@ -1,0 +1,28 @@
+# ============================================================
+# dialogs/*.yaml 字段规范（assets_schema/dialogs.schema.yaml）
+# 覆盖三类对话模块：first_mes.yaml（角色开场白）、alternate_NN.yaml（备用开场白）、
+# example_NN.yaml（mes_example 回合拆分）。
+# 约定：type / required（必现） / status（auto=生成器写死|raw=原卡字段透传|manual=可人工改写）
+#       / description / example
+# refs 契约：本文件由 persona.yaml 的 dialogs_refs[] 与 style.sample 按相对路径引用，
+#            基准根 = 资产目录。
+# ============================================================
+
+role:
+  type: string（枚举：user | char）
+  required: true
+  status: auto
+  description: 发言方：user=用户侧（{{user}}），char=角色侧（{{char}}；first_mes/alternate 均为 char）。
+  example: '"char"'
+note:
+  type: string
+  required: true
+  status: auto
+  description: 来源标注：first_mes / alternate_greetings[N] / mes_example 回合 N。
+  example: '"角色开场白（first_mes），角色侧发言"'
+content:
+  type: string（多行，YAML 块标量）
+  required: true
+  status: raw
+  description: 对话正文（原样保留；不含 {{user}}/{{char}} 前缀标记）。
+  example: '|-\n  你好，我是数据流里一个比较固执的分支。'

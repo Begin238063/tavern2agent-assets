@@ -1,0 +1,171 @@
+# ============================================================
+# lore/*.yaml 字段规范（assets_schema/lore.schema.yaml）
+# 对应 build_assets.py split_lorebook() / migrate_lorebook() 产出的世界书模块。
+# 约定：type / required（必现） / status（auto=生成器写死|raw=原卡字段透传|manual=自动初值，可人工改写）
+#       / description / example
+# 所有权约定（--migrate 字段级合并的依据）：
+#   · _derived 块内 = 机器字段：content / comment / 原卡透传的激活语义 / sha，
+#     由 build_assets.py 按新卡整体重写，勿手改（手改会被 migrate 覆盖）；
+#   · 块外 = 人工字段：keys / note / layer / budget_tokens，首次生成给初值，
+#     之后视为人工所有，--migrate 原样保留。
+# refs 契约：本文件由 persona.yaml 的 lore_refs[] 按相对路径引用，基准根 = 资产目录。
+# ============================================================
+
+id:
+  type: string
+  required: true
+  status: auto
+  description: 模块序号 id，形如 entry_NN（按原卡 entries 顺序）。
+  example: '"entry_00"'
+source:
+  type: string
+  required: true
+  status: auto
+  description: 来源位置，形如 character_book.entries[N]；--migrate 的匹配键之一。
+  example: '"character_book.entries[0]"'
+
+# ── _derived 块（机器字段，--migrate 按新卡整体重写） ─────────────
+
+_derived:
+  type: 嵌套字典
+  required: true
+  status: auto
+  description: 机器字段容器；块内字段由 build_assets.py 维护，--migrate 只重写块内。
+  example: '见下方各字段'
+
+comment:
+  type: string
+  required: true
+  status: raw（块内）
+  description: 原卡条目注释（常含 [initvar] / [mvu_update] 等标记）。
+  example: '"[initvar]"'
+content:
+  type: string（多行，YAML 块标量）
+  required: true
+  status: raw（块内）
+  description: 世界书条目正文（原样保留）。
+  example: '|-\n  trust: 0\n  memory: empty'
+
+# ── 激活语义（layer 承重；constant/keys 是源卡 ST 透传信息，仅编译层消费） ──
+
+keys:
+  type: array<string>
+  required: true
+  status: manual（首次生成取原卡 keys，之后人工所有）
+  description: >-
+    主触发键（源卡 ST 激活字段）。**只由 compile_card.py 消费**（ST 运行时可达性检查：
+    启用+非常驻+keys 空=死条目）；资产路由由 layer 决定，validate 不检查 keys。
+    **为什么它是块外 manual、而其余激活语义（secondary_keys/selective/constant/…）
+    是块内 raw**：那些字段除了编回 ST 卡没有别的用途，改它们没有意义，所以归机器、
+    随卡刷新；而 keys 有一个正当的人工用途——原卡 keys 写得太泛或太窄时，你需要
+    在不动原卡的前提下改掉它，让编回去的 ST 卡能正常触发（compile_card.py 的死条目
+    检查针对的就是这个）。代价是它**不随 --migrate 刷新**：上游卡改了 keys，
+    你这边看到的仍是自己那份。要拿回卡里的新值只能手动比对 card.json，
+    或对该文件用 --force（会清掉同文件其它人工字段，慎用）。
+    结论：没有 ST 侧触发问题时**不要动它**，让首次生成的原卡值留着。
+  example: '["悲鸣", "海蚀现象"]'
+secondary_keys:
+  type: array<string>
+  required: true
+  status: raw（块内）
+  description: 次触发键（ST 排除语义：命中则不注入）。selective=true 时为空 = 无操作、等价 selective=false（validate 信息）。
+  example: '[]'
+selective:
+  type: boolean
+  required: true
+  status: raw（块内）
+  description: 是否选择性条目（用 secondary_keys 做排除；仅编译层归一化消费）。
+  example: 'false'
+constant:
+  type: boolean
+  required: true
+  status: raw（块内，**不再参与路由**）
+  description: 源卡是否常驻（ST 透传信息，仅 compile_card.py 编 ST 卡时使用）。**不参与资产路由**——路由由块外 layer 决定；压缩/调整路由只需改 layer，不必改本字段。
+  example: 'true'
+enabled:
+  type: boolean
+  required: true
+  status: raw（块内）
+  description: 原卡是否启用该条目（ST 侧语义）。
+  example: 'true'
+disabled:
+  type: boolean
+  required: true
+  status: auto（块内）
+  description: 是否禁用（= not enabled）。disabled 条目仍保留（DLC/路线/草稿），须在块外 note 记录去向。
+  example: 'false'
+insertion_order:
+  type: integer
+  required: true
+  status: raw（块内）
+  description: 预算截断与拼接顺序（数值小者优先/靠前）。
+  example: '100'
+case_sensitive:
+  type: boolean
+  required: true
+  status: raw（块内）
+  description: 触发键大小写是否敏感（原卡 extensions.case_sensitive，null 视为 false）。
+  example: 'false'
+scan_depth:
+  type: integer | null
+  required: true
+  status: raw（块内）
+  description: 回溯扫描的消息条数；null 用全局默认。
+  example: 'null'
+prevent_recursion:
+  type: boolean
+  required: true
+  status: raw（块内）
+  description: 是否防止自身输出再次触发本条目。
+  example: 'false'
+use_regex:
+  type: boolean
+  required: true
+  status: raw（块内）
+  description: 原卡 keys 是否按正则匹配（影响渲染器与回放工具的匹配方式）。
+  example: 'true'
+inject_at:
+  type: string（枚举）
+  required: true
+  status: raw（块内，由原卡 position/depth 语义映射）
+  description: 平台无关注入位置语义词表：resident（常驻，constant=true 时；AstrBot 编译进 Persona system_prompt，静态可缓存）/ context_head（AstrBot → extra_user_content_parts 块内靠前，.mark_as_temp() 只参与本轮）/ near_input（AstrBot → extra_user_content_parts 块内靠后，.mark_as_temp()）。禁止写入 contexts（真实会话历史，会持久化导致下一轮重复注入）。渲染器映射规则见 SKILL.md「渲染器映射」。
+  example: '"near_input"'
+extensions_json:
+  type: string（JSON 字符串）
+  required: false
+  status: raw（块内）
+  description: 其余未提升为一级字段的原卡字段（extensions/interval/token_budget 等）原样序列化；无则缺省。
+  example: '"{\"extensions\": {\"interval\": 10}}"'
+_entry_id:
+  type: integer
+  required: false
+  status: auto（块内）
+  description: 原卡条目稳定 id（ST entries[].id）；--migrate 按它匹配旧文件，索引漂移也不错配。
+  example: '0'
+_card_sha:
+  type: string
+  required: true
+  status: auto（块内）
+  description: 来源 card.json 的 SHA-256；--migrate 后更新，用于追溯该文件对应的卡版本。
+  example: '"3f9a8e2c…"'
+
+# ── 块外人工字段（--migrate 原样保留） ──────────────────────────
+
+note:
+  type: string
+  required: true
+  status: manual（首次生成自动初值：原卡标记 + 常驻/选择性/禁用提示）
+  description: 去向记录：原卡标记、该条目留存的理由；disabled 条目必须在此写下处置去向（保留/丢弃/待定 + 理由），等于机器默认值也算未处置（validate 强制）。
+  example: '"原卡标记: [initvar]；常驻条目；处置：保留（DLC 备选），理由见卡内说明"' 
+layer:
+  type: string（枚举）
+  required: true
+  status: manual（**承重字段**：决定路由目标，取值必填；migrate 原样保留）
+  description: 唯一的路由载体：identity（人格本体）/ behavior（行为规则）→ 编译进 Persona 的 system_prompt（静态、可缓存），计入 resident_tokens；narrative（叙事/设定）→ 进知识库靠内容检索（不进常驻）。取值必填（空/非法 → validate 错误）；constant 不参与路由，压缩只需改 layer，不改任何 _derived 字段。
+  example: '"narrative"'
+budget_tokens:
+  type: integer | null
+  required: true
+  status: manual（首次生成取原卡 token_budget，无则 null）
+  description: 本条 token 上限（编译期校验用）；null = 不单独设限。
+  example: 'null'
