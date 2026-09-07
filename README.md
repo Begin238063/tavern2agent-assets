@@ -9,6 +9,25 @@
 - 新增：`scripts/build_assets.py`（资产骨架生成器，支持 `--migrate` 字段级合并）、`scripts/validate_assets.py`（资产校验器，persona 完整性 + lore 可用性门禁）、`scripts/replay_hitrate.py`（keys 命中率回放）、`assets_schema/`（字段规范与示例）。
 - 删除：上游的 pi 运行时相关全部内容（references/、docs/、start.sh、decision gate、event packs 等）。
 
+## 下游项目
+
+本工具仓被以下项目依赖：
+- **character-studio**（私有仓库）：通过 `toolchain.py` 子进程调用本仓脚本
+
+### 兼容性约定
+
+修改以下脚本的参数或输出格式时，需通知下游项目更新调用代码：
+- `extract_card.py`
+- `build_assets.py`
+- `validate_assets.py`（已新增 `--level` 参数，2026-09-07）
+- `compile_card.py`
+- `replay_hitrate.py`
+
+### 变更后检查清单
+- [ ] 更新本仓 `CHANGELOG.md`
+- [ ] 如有参数变更，通知下游项目更新 `toolchain.py`
+- [ ] 如有输出格式变更，通知下游项目更新解析逻辑
+
 ## 用法
 
 ### 基础流程
