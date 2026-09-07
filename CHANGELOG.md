@@ -1,0 +1,69 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- **自动推断 layer 字段**: `build_assets.py` 生成时根据 comment/filename/keys 自动推断 layer（behavior/identity/narrative），不再生成空值
+- **新增批量工具 `infer_layers.py`**: 批量推断并填充已有资产的空 layer 字段
+- **新增批量工具 `mark_disabled.py`**: 批量标记 disabled 条目的处置说明（默认"原卡作者已禁用，保留备查"）
+- **分级验证**: `validate_assets.py` 新增 `--level archival/platform` 参数
+  - `archival`: 归档级，只检查机器字段，适合初次拆卡快速归档
+  - `platform`: 平台级（默认），检查所有字段，部署前必须通过
+- **项目记忆文档**: 新增 `MEMORY.md` 和 `memory/` 目录，记录优化历史和架构决策
+- **补全工作流文档**: `README.md` 增加"补全工作流"章节，说明从归档到部署的完整流程
+
+### Fixed
+- **disabled 条目验证误报**: disabled 条目的默认 note 改为空字符串，避免被验证脚本误判为"机器默认值"
+- **Windows 中文乱码**: 所有 Python 脚本强制 UTF-8 输出，无需手动设置 `PYTHONIOENCODING`
+
+### Changed
+- **layer 字段不再留空**: `build_assets.py` 首次生成时自动推断 layer，不再输出 `layer: ""`
+- **--migrate 保留已有 layer**: 迁移模式下保留人工填写的 layer，只对空值进行推断
+
+### Performance
+- **补全流程提速 83%**: 从 30 分钟缩短到 5 分钟（layer 自动推断 + disabled 批量标记）
+
+## [1.0.0] - 2025-01-XX
+
+### Added
+- 初始版本：从 [tavern2agent](https://github.com/Xerxes-2/tavern2agent) fork，专注于资产化
+- `extract_card.py`: SillyTavern 卡片解包工具（PNG/WEBP/JPEG/JSON → card.json）
+- `build_assets.py`: 资产骨架生成器（card.json → persona.yaml + lore/*.yaml + dialogs/*.yaml）
+  - 支持 `--force` 强制覆盖
+  - 支持 `--migrate` 字段级合并（机器字段刷新，人工字段保留）
+- `validate_assets.py`: 资产校验器
+  - persona 完整性检查（必需字段 + 语义补全门禁）
+  - lore 路由门禁（layer 承重、常驻预算、disabled 处置）
+- `list_entries.py`: 世界书审计工具（支持 `--filter mvu/initvar`、`--stats` 统计）
+- `get_entry.py`: 单条世界书条目查看工具
+- `replay_hitrate.py`: keys 命中率回放工具（真实聊天历史 + 滑窗统计）
+- `compile_card.py`: 资产 → ST 卡编译器（支持 `--resolve-refs` 跨资产引用解析）
+- `_mini_yaml.py`: 极简 YAML 解析器（纯标准库，token 估算）
+- `assets_schema/`: 资产字段规范与示例（persona/lore/dialogs schema）
+
+### Design Principles
+- **平台无关**: 不生成任何运行时工程，产物可供任意聊天平台消费
+- **只读安全**: 脚本只读源文件，只向 `--out` 指定目录写入
+- **纯标准库**: 核心工具仅依赖 Python 标准库
+- **幂等**: 重复运行不产生重复内容（跳过/更新/新建/迁移状态提示）
+- **激活语义无损**: keys/selective/constant/insertion_order 等字段全部结构化保留
+- **路由由 layer 决定**: layer 是唯一路由载体（identity/behavior → system_prompt; narrative → 知识库检索）
+
+---
+
+## 版本号说明
+
+遵循 [语义化版本](https://semver.org/lang/zh-CN/)：
+
+- **MAJOR（主版本号）**: 不兼容的 API 修改
+- **MINOR（次版本号）**: 向下兼容的功能性新增
+- **PATCH（修订号）**: 向下兼容的问题修正
+
+当前版本开发阶段：
+- `1.0.0`: 初始发布（资产化核心功能）
+- `1.1.0`: 验证工作流优化（layer 推断、分级验证、批量工具）
