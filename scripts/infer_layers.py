@@ -65,12 +65,12 @@ def _infer_layer(comment: str, filename: str, keys: list, constant: bool) -> str
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python3 scripts/infer_layers.py <asset_dir>")
-        print("示例: python3 scripts/infer_layers.py characters/MyCharacter/")
-        return 1
+    import argparse
+    ap = argparse.ArgumentParser(description="批量推断并填充 lore/*.yaml 的空 layer 字段")
+    ap.add_argument("asset_dir", help="资产目录（含 lore/）")
+    args = ap.parse_args()
 
-    asset_dir = Path(sys.argv[1])
+    asset_dir = Path(args.asset_dir)
     lore_dir = asset_dir / "lore"
 
     if not lore_dir.is_dir():
