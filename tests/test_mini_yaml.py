@@ -231,5 +231,35 @@ class TestSilentFailureBoundary(unittest.TestCase):
         self.assertNotIn("bad key", d)
 
 
+
+class TestLookaheadAfterKey(unittest.TestCase):
+    """`key:` 之后紧跟空行或注释行时，前瞻必须跳过它们再判断值的形态。
+
+    历史 bug：前瞻只看紧邻一行，于是 `keys:` 后面一个空行就让它落到「空值」分支，
+    静默吞掉人工填的 keys / layer —— 而空行在 YAML 里是完全正常的写法。
+    """
+
+    def test_blank_line_then_list(self):
+        self.assertEqual(_mini_yaml.parse("k:\n\n  - 1\n  - 2\n").get("k"), [1, 2])
+
+    def test_comment_then_list(self):
+        self.assertEqual(_mini_yaml.parse("k:\n  # 注释\n  - 1\n").get("k"), [1])
+
+    def test_comment_then_empty_list(self):
+        self.assertEqual(_mini_yaml.parse("k:\n  # 注释\n  []\n").get("k"), [])
+
+    def test_blank_then_nested_dict(self):
+        d = _mini_yaml.parse("k:\n\n  a: 1\n")
+        self.assertEqual(d.get("k"), {"a": 1})
+
+    def test_several_blanks_and_comments(self):
+        d = _mini_yaml.parse("# 头注释\nk:\n  # c1\n\n  # c2\n  - 1\n")
+        self.assertEqual(d.get("k"), [1])
+
+    def test_genuinely_empty_still_empty(self):
+        d = _mini_yaml.parse("k:\nnext: 1\n")
+        self.assertEqual(d.get("k"), "")
+        self.assertEqual(d.get("next"), 1)
+
 if __name__ == "__main__":
     unittest.main()

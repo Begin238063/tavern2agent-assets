@@ -16,6 +16,7 @@
 
 import subprocess
 import sys
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -183,12 +184,18 @@ class TestLayerGates(unittest.TestCase):
         self._tmp.cleanup()
 
     def _set_layer(self, value: str):
+        """改写 layer 行（value 传空串 = 造未分层）。
+
+        用正则按行改写而不是字符串替换：`_infer_layer` 上线后新建条目的 layer 已是
+        `narrative`，旧写法只匹配空值形态 `layer:` / `layer: `，从此静默失配。
+        """
         for f in sorted(self.lore.glob("*.yaml")):
             t = f.read_text(encoding="utf-8")
-            f.write_text(t.replace("\nlayer:\n", f"\nlayer: {value}\n")
-                          .replace("\nlayer: \n", f"\nlayer: {value}\n"), encoding="utf-8")
+            f.write_text(re.sub(r"^layer: .*$", f"layer: {value}", t, count=1, flags=re.M),
+                         encoding="utf-8")
 
     def test_未分层被拦住(self):
+        self._set_layer("")  # 显式造未分层：新建条目的 layer 现在会被自动推断
         r = _run("validate_assets.py", str(self.asset))
         self.assertEqual(r.returncode, 1)
         self.assertIn("未分层", r.stdout)

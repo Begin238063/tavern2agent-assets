@@ -123,7 +123,9 @@ class TestMigrate(unittest.TestCase):
         e5 = _lore_by_eid(self.lore, 5)
         d5 = _mini_yaml.parse(e5.read_text(encoding="utf-8"))
         self.assertEqual(d5.get("keys"), ["条目五"])
-        self.assertEqual(d5.get("layer"), "")  # 待填：layer 承重，新建条目不默认 narrative
+        # 新建条目的 layer 由 _infer_layer 自动推断（见 CHANGELOG「layer 字段不再留空」）；
+        # 此处期望曾停留在「留空待人工填」，与 auto-infer 上线后的代码不符。
+        self.assertEqual(d5.get("layer"), "narrative")
         self.assertIsNone(d5.get("budget_tokens"))
         for k in ("comment", "secondary_keys", "selective", "constant", "enabled",
                   "insertion_order", "case_sensitive", "scan_depth", "prevent_recursion",

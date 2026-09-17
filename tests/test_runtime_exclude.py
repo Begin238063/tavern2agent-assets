@@ -94,14 +94,21 @@ class TestRuntimeExclude(unittest.TestCase):
 
     def test_清单读不出时fail_closed_不生成任何东西(self):
         # 缺 exclude_entry_ids：_mini_yaml 会解析成 {} / 空串，必须报错而不是当空清单
-        for bad in ("version: \"1\"\n", "exclude_entry_ids: \"2,3\"\n",
-                    "exclude_entry_ids:\n  # 序列里的独立注释行会被解析成空串\n  - 2\n"):
+        # 注：`key:` 后紧跟注释行曾因 _mini_yaml 前瞻 bug 被解析成空串，那个 bug
+        # 已修（见 test_mini_yaml.TestLookaheadAfterKey），所以它不再是坏清单。
+        for bad in ("version: \"1\"\n", "exclude_entry_ids: \"2,3\"\n"):
             with self.subTest(manifest=bad):
                 self._write_manifest(bad)
                 r = _run("build_assets.py", "--card", str(self.card_path), "--out", str(self.out))
                 self.assertNotEqual(r.returncode, 0, "应 fail-closed 报错")
                 self.assertIn("exclude_entry_ids", r.stdout + r.stderr)
                 self.assertFalse(self.out.exists(), "报错时不应产出任何资产")
+
+    def test_key后紧跟注释行仍能读出清单(self):
+        self._write_manifest("exclude_entry_ids:\n  # 注释行紧跟 key\n  - 2\n")
+        r = _run("build_assets.py", "--card", str(self.card_path), "--out", str(self.out))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self._lore_eids(), {1, 3})
 
     def test_迁移时被排除的旧文件不被标为孤儿(self):
         r = _run("build_assets.py", "--card", str(self.card_path), "--out", str(self.out))

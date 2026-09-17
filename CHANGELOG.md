@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **补全工作流文档**: `README.md` 增加"补全工作流"章节，说明从归档到部署的完整流程
 
 ### Fixed
+- **`_mini_yaml` 前瞻漏跳空行/注释行（会静默丢数据）**: `key:` 后面紧跟空行或注释行时会被误判成
+  「空值」。`gen_persona_sketch` 产出的 persona.yaml 正是 `core:` 后紧跟一行注释，于是 `core`
+  整块被解析成空字符串；而 `--migrate` 的 persona 合并有 `isinstance(sec, dict)` 守卫 ——
+  结果是**人工补全的 `core.self` / `traits` / `capabilities` / `boundaries` 在每次 migrate 时
+  被静默丢掉**（实测：304 字符 → 79 字符）。前瞻现在跳过空行与注释行，并补了 6 个回归用例。
+  空行在 YAML 里是完全正常的写法，手工编辑极易触发。
+- **三个过期测试**: `_infer_layer` 自动推断 layer 上线后，「新建条目 layer 留空」的期望与
+  `test_validate_gates` 里靠字符串替换造空层/非法层的前置条件都失效了 —— 代码是对的、测试没跟上。
+  已更新，套件恢复全绿。
 - **disabled 条目验证误报**: disabled 条目的默认 note 改为空字符串，避免被验证脚本误判为"机器默认值"
 - **Windows 中文乱码**: 所有 Python 脚本强制 UTF-8 输出，无需手动设置 `PYTHONIOENCODING`
 

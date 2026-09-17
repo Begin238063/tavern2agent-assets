@@ -82,17 +82,23 @@ def _parse_level(lines, start, indent):
             i += 1
             continue
         key, rest = m.group(1), m.group(2).strip()
-        nxt = lines[i + 1] if i + 1 < n else ""
+        # 前瞻必须跳过空行与注释行：`key:` 后面紧跟一个空行或注释行时若不跳过，
+        # 会落到下面「空值」分支，静默吞掉 keys / layer 这类人工字段 —— 而空行在
+        # YAML 里是完全正常的写法（手工编辑资产极易触发）。
+        k = i + 1
+        while k < n and (not lines[k].strip() or lines[k].lstrip().startswith("#")):
+            k += 1
+        nxt = lines[k] if k < n else ""
         nxt_s = nxt.strip()
         nxt_i = len(nxt) - len(nxt.lstrip(" ")) if nxt else 0
         if rest == "":
             if nxt_s == "[]":
                 d[key] = []
-                i += 2
+                i = k + 1
                 continue
             if nxt_s.startswith("-"):
                 lst = []
-                j = i + 1
+                j = k
                 while j < n:
                     l2 = lines[j]
                     if not l2.strip() or l2.lstrip().startswith("#"):
@@ -109,7 +115,7 @@ def _parse_level(lines, start, indent):
                 i = j
                 continue
             if nxt_s and nxt_i > indent and re.match(r"^\S+:", nxt_s):
-                sub, j = _parse_level(lines, i + 1, nxt_i)
+                sub, j = _parse_level(lines, k, nxt_i)
                 d[key] = sub
                 i = j
                 continue
