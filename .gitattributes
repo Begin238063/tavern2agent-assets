@@ -1,0 +1,3 @@
+# 钩子必须 LF：本仓 core.autocrlf=true，检出成 CRLF 会让 sh 把 \r 当成词的一部分，
+# 钩子里的 staged=$(git diff --cached --name-only) 会失效（且是静默的）。
+.githooks/* text eol=lf
