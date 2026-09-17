@@ -322,7 +322,51 @@ def _entry_key_name(entry: dict, idx: int) -> str:
     return _sanitize_filename(raw_key, f"entry_{idx:02d}")
 
 
-def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str) -> list:
+# ─── 卡侧运行时清单（runtime.yaml）────────────────────────────────
+
+_RUNTIME_MANIFEST = "runtime.yaml"
+
+
+def _entry_id_of(entry: dict):
+    """原卡条目的稳定 id（`id` 字段）；非整数时返回 None。"""
+    try:
+        return int(entry.get("id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def load_runtime_exclude(card_path: Path) -> set:
+    """读与 card.json 同目录的 runtime.yaml 的 exclude_entry_ids，返回 id 集合。
+
+    用途：卡自带的 ST 运行时管道（CG 插图 / MVU 变量规则 / initvar / opening / 勿开勿关 等）
+    不属于「平台无关资产」，不该落进 characters/。这张清单放**卡侧**（随卡归档、描述卡的性质），
+    不放进私有仓的阈值文件（那是「你这个项目想要什么」）。
+
+    fail-closed：文件存在却读不出 exclude_entry_ids 时抛 ValueError，由调用方中止。
+    `_mini_yaml` 解析失败会返回空 dict——若静默当成空清单，排除就会悄悄失效，
+    比直接报错危险得多。
+    """
+    path = card_path.parent / _RUNTIME_MANIFEST
+    if not path.is_file():
+        return set()
+    parsed = _mini_yaml.parse(path.read_text(encoding="utf-8"))
+    raw = parsed.get("exclude_entry_ids") if isinstance(parsed, dict) else None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{path} 存在但读不出 exclude_entry_ids（应为缩进列表，见 _mini_yaml 支持的子集）。"
+            "该文件是「哪些条目不进资产层」的唯一声明，读不出就不能猜。"
+        )
+    ids = set()
+    for item in raw:
+        try:
+            ids.add(int(item))
+        except (TypeError, ValueError):
+            raise ValueError(f"{path} 的 exclude_entry_ids 含非整数项：{item!r}")
+    return ids
+
+
+def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str,
+                  exclude: set | None = None) -> list:
     """把 character_book.entries[] 拆为 lore/<key>.yaml，返回生成的文件路径列表。
 
     激活语义全部结构化保留（见 _machine_fields / _render_lore）；keys 为空时用 comment 命名。
@@ -336,6 +380,10 @@ def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str) -> list
     files = []
     used_names = set()  # 已用文件名，防同名 key 碰撞导致静默覆盖/丢失
     for idx, entry in enumerate(entries):
+        if _entry_id_of(entry) in (exclude or set()):
+            print(f"  [排除] character_book.entries[{idx}]"
+                  f"（{entry.get('comment') or entry.get('id')}）：在 runtime.yaml 清单里，不生成资产")
+            continue
         key_name = _entry_key_name(entry, idx)
         base_name = key_name
         n = 2
@@ -356,7 +404,8 @@ def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str) -> list
     return files
 
 
-def migrate_lorebook(card: dict, lore_dir: Path, sha256: str) -> list:
+def migrate_lorebook(card: dict, lore_dir: Path, sha256: str,
+                     exclude: set | None = None) -> list:
     """字段级合并：机器字段按新卡刷新，人工字段（keys/note/layer/budget_tokens）原样保留。
 
     - 优先按原卡稳定 id（_entry_id）匹配旧文件，其次按 source（character_book.entries[N]）
@@ -385,6 +434,14 @@ def migrate_lorebook(card: dict, lore_dir: Path, sha256: str) -> list:
     files = []
     matched = set()
     for idx, entry in enumerate(entries):
+        _xid = _entry_id_of(entry)
+        if _xid in (exclude or set()):
+            # 排除 ≠ 上游删条目：把对应旧文件记成已匹配，免遭 _orphaned 误标
+            for f, (_s, _e) in existing.items():
+                if _e is not None and _e == str(_xid):
+                    matched.add(f)
+                    print(f"  [排除] {_display(f)}（_entry_id={_xid}，在 runtime.yaml 清单里，保留不动）")
+            continue
         src = f"character_book.entries[{idx}]"
         machine = _machine_fields(entry, idx, sha256)
         eid = str(machine["_entry_id"]) if machine["_entry_id"] is not None else None
@@ -751,6 +808,11 @@ def main():
         return 1
 
     sha256 = _sha256_of(card_path)
+    try:
+        exclude = load_runtime_exclude(card_path)
+    except ValueError as exc:
+        print(f"错误：{exc}")
+        return 1
     name = (args.name or data.get("name") or "未命名角色").strip()
     if not name:
         name = "未命名角色"
@@ -761,10 +823,13 @@ def main():
     print(f"== 资产化（{mode}）：{name}（来源 {card_path.name}，sha256={sha256[:12]}…） ==")
 
     # 1) 世界书拆分 / 迁移
+    if exclude:
+        print(f"  卡侧 {_RUNTIME_MANIFEST}：排除 {len(exclude)} 条运行时管道条目，不进资产层")
     if args.migrate:
-        lore_files = migrate_lorebook(card, out_dir / "lore", sha256)
+        lore_files = migrate_lorebook(card, out_dir / "lore", sha256, exclude=exclude)
     else:
-        lore_files = split_lorebook(card, out_dir / "lore", force=args.force, sha256=sha256)
+        lore_files = split_lorebook(card, out_dir / "lore", force=args.force, sha256=sha256,
+                                    exclude=exclude)
     # 2) 开场白 + 对话拆分（开场白在前：first_mes / alternate_NN / example_NN）
     #    dialogs 纯机器产物：migrate 时也按新卡刷新
     dlg_force = args.force or args.migrate

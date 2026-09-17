@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **卡侧运行时清单 `runtime.yaml`**: `build_assets.py` 读 `cards/<角色名>/runtime.yaml` 的
+  `exclude_entry_ids`，把卡自带的 ST 运行时管道（CG 插图 / 行动选项 / `[mvu_update]` 变量规则簇 /
+  `[initvar]` / `[opening]` / `[勿开]` / `[勿关]`）挡在平台无关资产层之外；生成与迁移两条路径都生效，
+  `--migrate` 不会把这些条目已存在的文件误标 `_orphaned`。清单读不出时 **fail-closed** 报错中止
+  （`_mini_yaml` 解析失败会静默返回空 dict，当作空清单即等于排除悄悄失效）。见 SKILL.md
+  「卡侧运行时清单」。
 - **自动推断 layer 字段**: `build_assets.py` 生成时根据 comment/filename/keys 自动推断 layer（behavior/identity/narrative），不再生成空值
 - **新增批量工具 `infer_layers.py`**: 批量推断并填充已有资产的空 layer 字段
 - **新增批量工具 `mark_disabled.py`**: 批量标记 disabled 条目的处置说明（默认"原卡作者已禁用，保留备查"）

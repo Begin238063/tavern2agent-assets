@@ -197,6 +197,35 @@ python3 scripts/compile_card.py --assets characters/<角色名>/ --out out/card.
 | 作者说明 | creator_notes | provenance.md 备注；敏感秘密标注「资产内部，勿公开」 |
 | TH scripts / regex scripts | 状态栏/输出补丁 | 剥离补丁语法；可提取的规则/字段进 lore 或 persona 备注 |
 
+## 卡侧运行时清单（runtime.yaml）
+
+卡自带的 **ST 运行时管道**不属于平台无关资产，不该落进 `characters/`——`ARCHITECTURE.md`
+已经定过这条边界：「原卡的 `constant` / `keys` / `inject_at` 不参与路由，那是 ST 的运行时」。
+典型条目：CG 插图（EJS 模板 + `<pic>` 标签 + `{{roll}}`）、行动选项、`[mvu_update]` 变量规则簇、
+`[initvar]` / `[opening]` / `[勿开]` / `[勿关]`。这些内容留在资产层里永远是死文本，
+还会作为知识库文档参与检索、把 ST 语法注入提示词。
+
+处置方式是把它们的 `id` 写进**卡侧清单** `cards/<角色名>/runtime.yaml`：
+
+```yaml
+version: "1"
+
+exclude_entry_ids:
+  - 12    # 09_📌CG插图 —— EJS 模板 + {{roll:2}}×40 + <pic> 标签渲染
+  - 476   # [opening]开场数据存储勿开
+```
+
+- `build_assets.py` 读到它在**生成**与**迁移**两条路径上都跳过这些条目。
+- `--migrate` 时**不会**把这些条目已存在的文件误标 `_orphaned`——排除 ≠ 上游删条目。
+- **fail-closed**：清单存在却读不出 `exclude_entry_ids` 时直接报错中止。`_mini_yaml`
+  解析失败会返回空 dict，若静默当成空清单，排除就会悄悄失效。
+- 格式限制：`_mini_yaml` 只认固定子集，**序列里不能夹独立注释行**（会被解析成空串），
+  注释请写在条目同一行。
+- 内容不会丢：`cards/<名>/card.json` 保留全部条目原文；某条要改判回资产，从清单里
+  删掉它再重跑 `build_assets.py` 即可。
+- 清单**只登记纯运行时管道**。内容条目里内嵌的 `{{getvar::…}}` / `<%_ … _%>` 属于
+  「该剥离」而不是「该排除」——语义要留，得逐条改写成平台无关表述，不要图省事塞进这里。
+
 ## 世界书处理策略（资产化语境）
 
 每条（含 disabled）给去向：
