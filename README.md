@@ -5,9 +5,25 @@
 
 ## 与上游的关系
 
-- 保留：`scripts/extract_card.py`、`list_entries.py`、`get_entry.py`（上游原样）；解包/审计/字段审计方法论改写为「资产化」语境。
+- 保留：`scripts/extract_card.py`、`list_entries.py`、`get_entry.py`（均源自上游：`get_entry.py` 与上游逐字节相同，`extract_card.py` 增加 `_source_file`、`list_entries.py` 增加 `--stats`）；解包/审计/字段审计方法论改写为「资产化」语境。
 - 新增：`scripts/build_assets.py`（资产骨架生成器，支持 `--migrate` 字段级合并）、`scripts/validate_assets.py`（资产校验器，persona 完整性 + lore 可用性门禁）、`scripts/replay_hitrate.py`（keys 命中率回放）、`assets_schema/`（字段规范与示例）。
 - 删除：上游的 pi 运行时相关全部内容（references/、docs/、start.sh、decision gate、event packs 等）。
+
+### 同步策略：不做同步（与上游无共同祖先）
+
+本仓**不是 clone、也不是 GitHub 的 fork 网络关系**，而是复制文件新建的仓（初始 commit 为 `Local working copy`）。两边历史完全无关，`git merge-base HEAD upstream/main` 为空。
+
+- **`git merge upstream/main` 不成立**，本仓不做任何形式的同步。合并会把上游已删的 pi 运行时内容整批带回来，与本 fork 的定位相反；强行加 `--allow-unrelated-histories` 等于重开一个仓，不是同步。
+- **比对仍然可用**（`git diff` 比的是树而不是历史）：`git diff upstream/main -- <path>` 是本仓与上游之间唯一可靠的手段。
+- **只在遇到解包/解析异常时**看上游有没有可搬运的修复，不做定期同步：
+
+  ```bash
+  git fetch upstream && git diff upstream/main -- scripts/extract_card.py scripts/get_entry.py
+  ```
+
+  `get_entry.py` 与上游逐字节相同，修复可直接搬；`extract_card.py` 只多 `_source_file`，差异极小；`list_entries.py` 因本仓新增 `--stats` 已有分叉，需挑着看。
+- **上游是否还有本仓缺的东西**（2026-09-17 核对）：上游对上述脚本的最后两次改动是「自动归一化 v1 卡为 v2 schema」与「支持 PNG/WEBP/JPEG/JSON 四格式」，**均已在副本中**；上游近期活动（2026-07-08 结构重命名、07-11 英文 README）都在 `docs/` 与 `SKILL.md`，未触及 `scripts/`；上游整仓自 `2026-07-11` 未再提交。
+- **无法向上游提 PR**：无共同祖先 ⇒ GitHub 形成不了可合并的 PR。若要把改动回馈上游，需基于上游历史另建分支打 patch。
 
 ## 下游项目
 
