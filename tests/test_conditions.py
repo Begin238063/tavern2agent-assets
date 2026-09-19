@@ -91,6 +91,22 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(pairs, [("c > 1", "甲")])
         self.assertEqual(rep.conditions, 1)
 
+    def test_注释前缀的if仍被识别(self):
+        pairs, rep = _pairs("<%_ // 称呼逻辑 if (getvar('剧情权重') > 2203) { _%>甲<%_ } _%>")
+        self.assertEqual(pairs, [("剧情权重 > 2203", "甲")])
+        self.assertEqual(sum(rep.code_tags.values()), 1)
+
+    def test_一行闭多层(self):
+        pairs, _ = _pairs(
+            "<%_ if (getvar('a') > 1) { _%>"
+            "<%_ if (getvar('b') > 2) { _%>内<%_ } } _%>")
+        self.assertEqual([c for c, _ in pairs], ["a > 1 and b > 2"])
+
+    def test_纯注释标签按代码消费并报告(self):
+        pairs, rep = _pairs("<%_ //注意，勿手动开启此条目 _%>正文")
+        self.assertEqual(pairs, [(None, "正文")])
+        self.assertEqual(sum(rep.code_tags.values()), 1)
+
     def test_多余闭括号不会崩(self):
         pairs, _ = _pairs("甲<%_ } _%>乙")
         self.assertEqual("".join(t for _, t in pairs), "甲乙")

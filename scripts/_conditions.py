@@ -36,9 +36,11 @@ _NORM_COND = re.compile(rf"^\s*{_GETVAR}\s*{_COMPARE}\s*$", re.S)
 _RE_IF = re.compile(r"^\s*if\s*\((?P<expr>.*)\)\s*\{\s*$", re.S)
 _RE_ELSE_IF = re.compile(r"^\s*\}\s*else\s+if\s*\((?P<expr>.*)\)\s*\{\s*$", re.S)
 _RE_ELSE = re.compile(r"^\s*\}\s*else\s*\{\s*$", re.S)
-_RE_CLOSE = re.compile(r"^\s*\}\s*$", re.S)
+_RE_CLOSE = re.compile(r"^\s*(?P<braces>\}+)\s*$", re.S)
 # JS 声明/循环：是代码，不是内容
 _RE_DECL = re.compile(r"^\s*(const|let|var|function|for|while)\b", re.S)
+# 标签里带 `//` 注释前缀：`<%_ // 说明 if (getvar('x') > 1) { _%>`（真卡里有 4 处）
+_RE_COMMENT_IF = re.compile(r"^\s*//.*?\b(?P<tail>if\s*\(.*\)\s*\{\s*)$", re.S)
 
 
 @dataclass
@@ -120,6 +122,12 @@ def _classify(raw: str):
     if s.startswith("=") or s.startswith("-"):  # <%= %> / <%- %> 取值插值
         return "output", s[1:].strip()
     s = s.strip("_-").strip()  # 去掉 <%_ … _%> 的空白控制标记
+    if s.startswith("//"):  # 注释前缀 / 纯注释标签
+        mc = _RE_COMMENT_IF.match(s)
+        if not mc:
+            return "code", s
+        mi = _RE_IF.match(mc.group("tail"))  # 注释之后才是 if，要再取一次表达式
+        return ("commented", mi.group("expr")) if mi else ("code", s)
     m = _RE_IF.match(s)
     if m:
         return "if", m.group("expr")
@@ -128,8 +136,9 @@ def _classify(raw: str):
         return "else_if", m.group("expr")
     if _RE_ELSE.match(s):
         return "else", None
-    if _RE_CLOSE.match(s):
-        return "close", None
+    m = _RE_CLOSE.match(s)
+    if m:
+        return "close", len(m.group("braces"))  # 一行可能闭多层
     if _RE_DECL.match(s):  # JS 声明/辅助函数：代码，不是内容
         return "code", s
     return "unknown", s
@@ -157,6 +166,9 @@ def split_conditions(content: str, report: ConditionReport | None = None):
         buf.append(content[pos:m.start()])
         pos = m.end()
         kind, info = _classify(m.group(1))
+        if kind == "commented":  # 注释前缀 + if：注释本身是代码，要报告
+            rep.note_code("// 注释前缀")
+            kind = "if"
         if kind == "if":
             flush()
             stack.append(_normalize_condition(info, rep))
@@ -174,8 +186,9 @@ def split_conditions(content: str, report: ConditionReport | None = None):
             rep.else_branches += 1
         elif kind == "close":
             flush()
-            if stack:
-                stack.pop()
+            for _ in range(info or 1):  # 一行 } } 闭多层
+                if stack:
+                    stack.pop()
         elif kind == "code":  # JS 声明：纯代码，消费掉但要报告
             rep.note_code(m.group(0))
         else:  # output / unknown：原样保留并报告
