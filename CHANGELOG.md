@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`_conditions.py`（共享模块）**: 解析 EJS 条件门控（`<%_ if (getvar('X') > N) { _%> … <%_ } _%>`）
+  为 `[(条件, 正文)]`。**资产层不动**（EJS 原样留卡，见 macros.py 的立场）——它供**编译层**把门控变成结构化
+  元数据：ST 自己渲染 EJS 属无损路径，AstrBot 没有渲染器，不归一化就会把原始代码送进提示词。
+  不猜、不删、不静默：非标准表达式（复合条件、`if (false)`）原样保留并报告，JS 声明消费掉但要报告，
+  取值插值留在正文里待编译层按宏词表处理。实测 WuWa Solaris-3 卡：527 个条件、54 个 else、
+  123 条条目**散文零丢失**。
 - **卡侧运行时清单 `runtime.yaml`**: `build_assets.py` 读 `cards/<角色名>/runtime.yaml` 的
   `exclude_entry_ids`，把卡自带的 ST 运行时管道（CG 插图 / 行动选项 / `[mvu_update]` 变量规则簇 /
   `[initvar]` / `[opening]` / `[勿开]` / `[勿关]`）挡在平台无关资产层之外；生成与迁移两条路径都生效，

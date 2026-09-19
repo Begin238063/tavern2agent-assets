@@ -259,6 +259,20 @@ assets_schema/
 └── persona.example.yaml      # 完整示例（Bot）
 ```
 
+## EJS 条件门控（`_conditions.py`）
+
+部分卡把「剧情推进」写成 ST 的 EJS 条件：`<%_ if (getvar('stat_data.剧情权重') > 1001) { _%> … <%_ } _%>`，
+一个条目里塞整条时间线，后面的是前面的剧透。实测 WuWa Solaris-3：527 个条件、107 条条目。
+
+**资产层不改**（EJS 原样留在 `content` 里，与 macros.py 的立场一致：资产忠实于卡）。`_conditions.py`
+只负责把它解析成 `[(条件, 正文)]`，由**编译层**按平台归一化：
+
+- ST 自己会渲染 EJS —— `compile_card.py` 原样带走即无损，不需要它；
+- AstrBot 没有渲染器 —— 必须把门控变成元数据，否则原始代码进提示词（原始 EJS 进提示词是纯损失）。
+
+三条纪律：**不猜**（非标准表达式原样保留并报告）、**不删**（散文零丢失是硬不变量，有测试守着）、
+**不静默**（认不出的一律进 report，由人决定）。
+
 ## 硬约束
 
 - **平台无关**：产物中不得出现 pi、extension.ts、pi session、subagent、prompt orchestrator、start.sh 等平台专属概念；ST 的 depth/position 不直接透传，映射为平台无关注入语义 `inject_at`（resident/context_head/near_input）。
