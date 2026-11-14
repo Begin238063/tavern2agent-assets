@@ -260,48 +260,65 @@ def _render_lore(key_name: str, idx: int, machine: dict, manual: dict) -> str:
     return "\n".join(lines)
 
 
-def _infer_layer(entry: dict, filename: str) -> str:
-    """推断 layer 默认值（首次生成时）。
+_REGEX_KEY_META = re.compile(r"[\[\]()\\^$*+?|{}]")
+
+
+def infer_layer(entry: dict, filename: str = "", char_name: str = "") -> str:
+    """推断 layer 默认值（首次生成与 infer_layers.py 共用单一权威实现）。
 
     layer 是路由载体：
     - behavior: roleplay 逻辑、格式约束、变量更新规则
     - identity: 角色核心设定、世界观总纲、初始化变量
     - narrative: 剧情大纲、角色/地点/物品百科（默认）
+
+    保持卡片中性（不硬编码特定卡角色名）：
+    - 单角色卡的核心档案靠 constant + 角色名/单键匹配识别为 identity；
+    - [mvu_plot] 并非 MVU 变量引擎管道（见上游 mvu-mapping），仅在 constant=true 时归入 behavior。
     """
     comment = (entry.get("comment") or "").lower()
     filename_lower = filename.lower()
+    constant = bool(entry.get("constant", False))
+    keys = [str(k).strip() for k in (entry.get("keys") or []) if str(k).strip()]
 
-    # behavior: roleplay 指令、MVU 变量系统
+    # behavior: roleplay 指令、文风/门槛约束、MVU 变量系统
     behavior_patterns = [
-        "角色扮演", "roleplay", "注意事项", "系统指令",
-        "mvu_update", "mvu_plot", "变量更新", "变量格式", "变量禁词",
-        "变量输出", "变量防呆", "行动选项", "cg插图", "守岸人"
+        "角色扮演", "roleplay", "注意事项", "系统指令", "文风", "亲密门槛", "好感与亲密",
+        "mvu_update", "变量更新", "变量格式", "变量禁词",
+        "变量输出", "变量防呆", "行动选项", "cg插图",
     ]
     for pattern in behavior_patterns:
         if pattern in comment or pattern in filename_lower:
             return "behavior"
+    if constant and ("mvu_plot" in comment or "mvu_plot" in filename_lower):
+        return "behavior"
 
     # identity: 角色核心、世界观、初始化
     identity_patterns = [
-        "世界观总纲", "主角自设", "用户名变量", "角色核心",
+        "世界观总纲", "主角自设", "用户名变量", "角色核心", "核心人设", "人物核心",
         "initvar", "opening", "勿关", "勿开", "默认变量",
-        "i.r.i.s", "iris"
     ]
-    # 特殊：角色同名条目（如"清宵.yaml"）通常是核心档案
-    if entry.get("constant") and len(entry.get("keys") or []) == 1:
-        only_key = (entry.get("keys") or [""])[0]
-        if only_key and filename.startswith(only_key.lower()):
+    # 特殊：常驻且角色同名条目（如单角色卡"清宵.yaml"）通常是核心档案
+    if constant and len(keys) == 1:
+        only_key = keys[0]
+        if only_key and filename_lower.startswith(only_key.lower()):
+            return "identity"
+    if constant and char_name:
+        cn = char_name.strip().lower()
+        if len(cn) >= 2 and (comment.strip() == cn or any(k.lower() == cn for k in keys)):
             return "identity"
 
     for pattern in identity_patterns:
         if pattern in comment or pattern in filename_lower:
             return "identity"
 
-    # 默认：narrative（剧情、百科）
+    # 默认：narrative（剧情、百科、非常驻 NPC 档案）
     return "narrative"
 
 
-def _manual_defaults(entry: dict, filename: str = "") -> dict:
+_infer_layer = infer_layer
+
+
+def _manual_defaults(entry: dict, filename: str = "", char_name: str = "") -> dict:
     """首次生成时的人工字段初值（此后视为人工所有，--migrate 原样保留）。"""
     constant = bool(entry.get("constant", False))
     selective = bool(entry.get("selective", False))
@@ -309,16 +326,32 @@ def _manual_defaults(entry: dict, filename: str = "") -> dict:
     return {
         "keys": [str(k) for k in (entry.get("keys") or [])],
         "note": _note_of(entry.get("comment") or "", constant, selective, enabled),
-        "layer": _infer_layer(entry, filename),  # 首次生成时自动推断
+        "layer": infer_layer(entry, filename, char_name=char_name),  # 首次生成时自动推断
         "budget_tokens": entry.get("token_budget") or None,
     }
 
 
+def _is_noisy_key_for_filename(key: str, total_keys: int) -> bool:
+    """判断首个触发键是否不适合直接做文件名（占位键 / 正则表达式 / 大表假名单字）。"""
+    if key.startswith("$$") or "NO_TRIGGER" in key.upper():
+        return True
+    if _REGEX_KEY_META.search(key):
+        return True
+    if len(key) == 1 and total_keys >= 5:
+        return True
+    return False
+
+
 def _entry_key_name(entry: dict, idx: int) -> str:
-    """取 keys 里第一个非空 key 作为文件名；keys 为空时回退到 comment（v3 卡常无 keys 字段）；
-    两者皆空才用序号命名。"""
-    keys = entry.get("keys") or []
-    raw_key = (keys[0] if keys else "") or (entry.get("comment") or "")
+    """取 keys 里第一个可读非空 key 作为文件名；若首个 key 为正则/占位/单字泛表且有 comment，
+    或 keys 为空（v3 卡常无 keys 字段），回退到 comment；两者皆空才用序号命名。"""
+    keys = [str(k).strip() for k in (entry.get("keys") or []) if str(k).strip()]
+    comment = (entry.get("comment") or "").strip()
+    if keys:
+        k0 = keys[0]
+        raw_key = comment if (comment and _is_noisy_key_for_filename(k0, len(keys))) else k0
+    else:
+        raw_key = comment
     return _sanitize_filename(raw_key, f"entry_{idx:02d}")
 
 
@@ -366,12 +399,13 @@ def load_runtime_exclude(card_path: Path) -> set:
 
 
 def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str,
-                  exclude: set | None = None) -> list:
+                  exclude: set | None = None, char_name: str = "") -> list:
     """把 character_book.entries[] 拆为 lore/<key>.yaml，返回生成的文件路径列表。
 
     激活语义全部结构化保留（见 _machine_fields / _render_lore）；keys 为空时用 comment 命名。
     """
     data = card.get("data", card)
+    c_name = char_name or str(data.get("name") or "")
     entries = (data.get("character_book") or {}).get("entries") or []
     if not entries:
         print("⚠ 卡内无 character_book（世界书为空），跳过 lore 拆分。")
@@ -393,7 +427,7 @@ def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str,
         used_names.add(key_name)
 
         machine = _machine_fields(entry, idx, sha256)
-        manual = _manual_defaults(entry, key_name)
+        manual = _manual_defaults(entry, key_name, char_name=c_name)
         content = _render_lore(key_name, idx, machine, manual)
 
         path = lore_dir / f"{key_name}.yaml"
@@ -405,7 +439,7 @@ def split_lorebook(card: dict, lore_dir: Path, force: bool, sha256: str,
 
 
 def migrate_lorebook(card: dict, lore_dir: Path, sha256: str,
-                     exclude: set | None = None) -> list:
+                     exclude: set | None = None, char_name: str = "") -> list:
     """字段级合并：机器字段按新卡刷新，人工字段（keys/note/layer/budget_tokens）原样保留。
 
     - 优先按原卡稳定 id（_entry_id）匹配旧文件，其次按 source（character_book.entries[N]）
@@ -415,24 +449,27 @@ def migrate_lorebook(card: dict, lore_dir: Path, sha256: str,
     - 卡片中已移除的条目：保留文件并提示，由人工决定去留。
     """
     data = card.get("data", card)
+    c_name = char_name or str(data.get("name") or "")
     entries = (data.get("character_book") or {}).get("entries") or []
     if not entries:
         print("⚠ 卡内无 character_book，无可迁移。")
         return []
 
     existing = {}  # path -> (source, entry_id 字符串或 None)
-    for f in sorted(lore_dir.glob("*.yaml")):
-        try:
-            parsed = _mini_yaml.parse(f.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        src = parsed.get("source") or ""
-        eid = _mini_yaml.get(parsed, "_entry_id")
-        if src or eid is not None:
-            existing[f] = (src, str(eid) if eid is not None else None)
+    if lore_dir.is_dir():
+        for f in sorted(lore_dir.glob("*.yaml")):
+            try:
+                parsed = _mini_yaml.parse(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            src = parsed.get("source") or ""
+            eid = _mini_yaml.get(parsed, "_entry_id")
+            if src or eid is not None:
+                existing[f] = (src, str(eid) if eid is not None else None)
 
     files = []
     matched = set()
+    used_names = {f.stem for f in existing}
     for idx, entry in enumerate(entries):
         _xid = _entry_id_of(entry)
         if _xid in (exclude or set()):
@@ -455,22 +492,28 @@ def migrate_lorebook(card: dict, lore_dir: Path, sha256: str,
                          if f not in matched and e is None and s == src), None)
         if path is not None:
             matched.add(path)
+            key_name = path.stem  # migrate 不重命名：lore_refs 引用不变（须先绑定再供下方推断使用）
             old = _mini_yaml.parse(path.read_text(encoding="utf-8"))
             manual = {
                 "keys": old.get("keys") if old.get("keys") is not None
                         else [str(k) for k in (entry.get("keys") or [])],
                 "note": old.get("note") if old.get("note") is not None
-                        else _manual_defaults(entry, key_name)["note"],
-                "layer": old.get("layer") or _infer_layer(entry, key_name),  # 保留人工 layer；空则推断
+                        else _manual_defaults(entry, key_name, char_name=c_name)["note"],
+                "layer": old.get("layer") or infer_layer(entry, key_name, char_name=c_name),
                 "budget_tokens": old.get("budget_tokens")
                         if old.get("budget_tokens") is not None
                         else (entry.get("token_budget") or None),
             }
-            key_name = path.stem  # migrate 不重命名：lore_refs 引用不变
             status = "迁移"
         else:
             key_name = _entry_key_name(entry, idx)
-            manual = _manual_defaults(entry, key_name)
+            base_name = key_name
+            n = 2
+            while key_name in used_names:
+                key_name = f"{base_name}_{n}"
+                n += 1
+            used_names.add(key_name)
+            manual = _manual_defaults(entry, key_name, char_name=c_name)
             path = lore_dir / f"{key_name}.yaml"
             status = "新建"
         content = _render_lore(key_name, idx, machine, manual)
@@ -826,10 +869,10 @@ def main():
     if exclude:
         print(f"  卡侧 {_RUNTIME_MANIFEST}：排除 {len(exclude)} 条运行时管道条目，不进资产层")
     if args.migrate:
-        lore_files = migrate_lorebook(card, out_dir / "lore", sha256, exclude=exclude)
+        lore_files = migrate_lorebook(card, out_dir / "lore", sha256, exclude=exclude, char_name=name)
     else:
         lore_files = split_lorebook(card, out_dir / "lore", force=args.force, sha256=sha256,
-                                    exclude=exclude)
+                                    exclude=exclude, char_name=name)
     # 2) 开场白 + 对话拆分（开场白在前：first_mes / alternate_NN / example_NN）
     #    dialogs 纯机器产物：migrate 时也按新卡刷新
     dlg_force = args.force or args.migrate

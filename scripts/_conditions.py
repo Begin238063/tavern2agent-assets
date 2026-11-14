@@ -36,7 +36,7 @@ _NORM_COND = re.compile(rf"^\s*{_GETVAR}\s*{_COMPARE}\s*$", re.S)
 _RE_IF = re.compile(r"^\s*if\s*\((?P<expr>.*)\)\s*\{\s*$", re.S)
 _RE_ELSE_IF = re.compile(r"^\s*\}\s*else\s+if\s*\((?P<expr>.*)\)\s*\{\s*$", re.S)
 _RE_ELSE = re.compile(r"^\s*\}\s*else\s*\{\s*$", re.S)
-_RE_CLOSE = re.compile(r"^\s*(?P<braces>\}+)\s*$", re.S)
+_RE_CLOSE = re.compile(r"^\s*(?P<braces>\}(?:\s*\})*)\s*$", re.S)
 # JS 声明/循环：是代码，不是内容
 _RE_DECL = re.compile(r"^\s*(const|let|var|function|for|while)\b", re.S)
 # 标签里带 `//` 注释前缀：`<%_ // 说明 if (getvar('x') > 1) { _%>`（真卡里有 4 处）
@@ -106,11 +106,12 @@ def _normalize_condition(expr: str, report: ConditionReport) -> str:
     return expr
 
 
-def _balance(stack: list) -> str | None:
+def _balance(stack: list[tuple[list[str], str]]) -> str | None:
     """把当前打开的条件栈合成一个合取表达式（嵌套时用 and 连接）。"""
-    if not stack:
+    parts = [active for _, active in stack if active]
+    if not parts:
         return None
-    return " and ".join(stack)
+    return " and ".join(parts)
 
 
 def _classify(raw: str):
@@ -138,7 +139,7 @@ def _classify(raw: str):
         return "else", None
     m = _RE_CLOSE.match(s)
     if m:
-        return "close", len(m.group("braces"))  # 一行可能闭多层
+        return "close", m.group("braces").count("}")  # 一行可能闭多层（允许空格分隔如 `} }`）
     if _RE_DECL.match(s):  # JS 声明/辅助函数：代码，不是内容
         return "code", s
     return "unknown", s
@@ -152,7 +153,8 @@ def split_conditions(content: str, report: ConditionReport | None = None):
     """
     rep = report if report is not None else ConditionReport()
     segs: list[Segment] = []
-    stack: list = []
+    # 每层栈保存 (本 if-else 链已出现的所有前置分支条件列表, 当前分支生效条件)
+    stack: list[tuple[list[str], str]] = []
     buf: list[str] = []
     pos = 0
 
@@ -171,18 +173,23 @@ def split_conditions(content: str, report: ConditionReport | None = None):
             kind = "if"
         if kind == "if":
             flush()
-            stack.append(_normalize_condition(info, rep))
+            cur = _normalize_condition(info, rep)
+            stack.append(([cur], cur))
             rep.conditions += 1
         elif kind == "else_if":
             flush()
-            prev = stack.pop() if stack else ""
+            seen = stack.pop()[0] if stack else []
             cur = _normalize_condition(info, rep)
-            stack.append(f"not({prev}) and {cur}" if prev else cur)
+            neg_prefix = [f"not({c})" for c in seen if c]
+            active = " and ".join([*neg_prefix, cur]) if neg_prefix else cur
+            stack.append(([*seen, cur], active))
             rep.conditions += 1
         elif kind == "else":
             flush()
-            prev = stack.pop() if stack else ""
-            stack.append(f"not({prev})" if prev else "")
+            seen = stack.pop()[0] if stack else []
+            neg_prefix = [f"not({c})" for c in seen if c]
+            active = " and ".join(neg_prefix)
+            stack.append((seen, active))
             rep.else_branches += 1
         elif kind == "close":
             flush()

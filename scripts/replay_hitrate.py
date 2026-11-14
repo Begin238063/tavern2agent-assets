@@ -24,9 +24,16 @@ token 估算口径（与 validate 一致）：中文 1 字符≈1 token，ASCII 
 """
 
 import argparse
+import io
 import json
 import re
+import sys
 from pathlib import Path
+
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 import _mini_yaml
 

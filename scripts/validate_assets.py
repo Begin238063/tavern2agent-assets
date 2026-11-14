@@ -3,7 +3,7 @@
 """validate_assets.py —— 机器校验 build_assets.py 产出的资产骨架。
 
 用法：
-    python3 scripts/validate_assets.py characters/<角色名>/ [--budget-tokens N] [--strict]
+    python3 scripts/validate_assets.py characters/<角色名>/ [--budget-tokens N] [--strict] [--summary]
     python3 scripts/validate_assets.py characters/<角色名>/ --level archival  # 归档级验证
     python3 scripts/validate_assets.py characters/<角色名>/ --report-unlayered   # 只输出未分层工作清单
 
@@ -79,6 +79,11 @@ INJECT_ATS = ("resident", "context_head", "near_input")
 _OVER_BROAD_REGEX = {".", ".*", "(.+)", "^.*$", ".*.*"}
 # 未分层条目的 comment 前缀分组
 _GROUP_RULES = (("mvu", re.compile(r"mvu", re.I)), ("initvar", re.compile(r"initvar", re.I)))
+# ST 运行时补丁残留特征（吸收上游 validation.md 残留扫描）
+_ST_PATCH_RE = re.compile(
+    r"<UpdateVariable>|JSONPatch|<%[_\-=]?|\{\{(?:getvar|setvar|addvar)::|<StatusPlaceHolder|<!--AI_HIDE_|<(?:options|selection)>",
+    re.I,
+)
 
 est = _mini_yaml.estimated_tokens  # token 估算（中文 1 字符≈1 token，ASCII 4 字符≈1 token）
 
@@ -203,6 +208,66 @@ def _asset_config(asset_dir: Path) -> dict:
     return _mini_yaml.parse(cfg_path.read_text(encoding="utf-8"))
 
 
+def _scan_st_residuals(asset_dir: Path, persona: dict, errors: list, warnings: list,
+                       infos: list, strict: bool) -> None:
+    """扫描 persona 语义字段与 dialogs/*.yaml 中的 ST 运行时补丁残留。"""
+    persona_hits = []
+    for sec, keys in (("identity", ("codename", "archetype")),
+                      ("core", ("self",)),
+                      ("style", ("tone",)),
+                      ("relationship", ("form", "memory_policy"))):
+        sub = persona.get(sec) if isinstance(persona.get(sec), dict) else {}
+        for k in keys:
+            v = sub.get(k)
+            if isinstance(v, str) and _ST_PATCH_RE.search(v):
+                persona_hits.append(f"{sec}.{k}")
+    for sec, keys in (("core", ("traits", "capabilities", "boundaries")),
+                      ("style", ("habits",))):
+        sub = persona.get(sec) if isinstance(persona.get(sec), dict) else {}
+        for k in keys:
+            v = sub.get(k)
+            if isinstance(v, list) and any(isinstance(x, str) and _ST_PATCH_RE.search(x) for x in v):
+                persona_hits.append(f"{sec}.{k}[]")
+    if persona_hits:
+        (errors if strict else warnings).append(
+            f"persona 含 ST 运行时语法残留：{', '.join(persona_hits)} —— 请改写为平台无关表述"
+        )
+
+    dlg_dir = asset_dir / "dialogs"
+    if dlg_dir.is_dir():
+        dlg_files = sorted(dlg_dir.glob("*.yaml"))
+        patched_dlgs = []
+        for f in dlg_files:
+            d = _mini_yaml.parse(f.read_text(encoding="utf-8"))
+            c = d.get("content") if isinstance(d, dict) else ""
+            if isinstance(c, str) and _ST_PATCH_RE.search(c):
+                patched_dlgs.append(f.name)
+        if patched_dlgs:
+            sample_names = ", ".join(patched_dlgs[:3])
+            more = f" 等 {len(patched_dlgs)} 个" if len(patched_dlgs) > 3 else f" 共 {len(patched_dlgs)} 个"
+            infos.append(
+                f"dialogs 含 ST 开场运行时块：{sample_names}{more}/{len(dlg_files)} 个文件含 "
+                "<UpdateVariable>/<selection>/AI_HIDE 等标签（资产层原样保留，非 ST 平台消费时需在渲染或编译层剥离）"
+            )
+
+
+def _print_grouped(items: list, icon: str, max_samples: int = 3) -> None:
+    """--summary 模式：按『前缀：』分组折叠输出，避免大型世界书刷屏。"""
+    groups: dict[str, list[str]] = {}
+    for msg in items:
+        prefix = msg.split("：", 1)[0]
+        groups.setdefault(prefix, []).append(msg)
+    for prefix, msgs in groups.items():
+        if len(msgs) <= max_samples:
+            for m in msgs:
+                print(f"{icon} {m}")
+        else:
+            print(f"{icon} {prefix}（共 {len(msgs)} 条，展示前 {max_samples} 条）：")
+            for m in msgs[:max_samples]:
+                rest = m.split("：", 1)[1] if "：" in m else m
+                print(f"    · {rest}")
+
+
 def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
                 budget_tokens, strict: bool, level: str = "platform") -> tuple:
     """逐条检查 lore/*.yaml 的路由门禁；返回 (检查数, resident_tokens)。
@@ -213,14 +278,25 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
     budget_tokens：None = 未配置，跳过预算门禁（阈值由资产目录 validation.yaml
     或 --budget-tokens 提供，工具不内置默认值）。
     """
-    lore_dir = asset_dir / "lore"
-    if not lore_dir.is_dir():
-        return 0, 0
-    checked = 0
-    resident = 0
     persona = _mini_yaml.parse((asset_dir / "persona.yaml").read_text(encoding="utf-8")) \
         if (asset_dir / "persona.yaml").is_file() else {}
-    resident += _persona_standing_tokens(persona)
+    persona_tok = _persona_standing_tokens(persona)
+    _scan_st_residuals(asset_dir, persona, errors, warnings, infos, strict)
+
+    lore_dir = asset_dir / "lore"
+    if not lore_dir.is_dir():
+        if level == "platform" and budget_tokens is not None and persona_tok > budget_tokens:
+            errors.append(
+                f"常驻预算超限：resident_tokens（persona 常驻）共约 {persona_tok} estimated_tokens > 预算 {budget_tokens}"
+            )
+        elif budget_tokens is None:
+            infos.append("未配置常驻预算（资产目录无 validation.yaml 且未传 --budget-tokens），跳过预算门禁")
+        return 0, persona_tok
+
+    checked = 0
+    resident = persona_tok
+    layer_tok = {"identity": 0, "behavior": 0, "narrative": 0, "disabled": 0}
+    layer_cnt = {"identity": 0, "behavior": 0, "narrative": 0, "disabled": 0}
     unlayered_groups = _collect_unlayered(lore_dir)
 
     for f in sorted(lore_dir.glob("*.yaml")):
@@ -239,14 +315,21 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
         orphaned = bool(_mini_yaml.get(d, "_orphaned", False))
         comment = _mini_yaml.get(d, "comment", "") or ""
         content = _mini_yaml.get(d, "content", "") or ""
+        tok = est(content)
 
         # 1) layer 缺失/为空=未分层：仅 platform 级别报错
         # 2) layer 不在词表 → 错误（承重字段）
         if enabled and layer and layer not in LAYERS:
             errors.append(f"lore layer 取值非法：{label} —— {layer!r}（应为 identity/behavior/narrative）")
-        # 3) 常驻预算：resident_tokens
-        if enabled and layer in ("identity", "behavior"):
-            resident += est(content)
+        # 3) 常驻预算与分层统计：resident_tokens
+        if disabled or not enabled:
+            layer_tok["disabled"] += tok
+            layer_cnt["disabled"] += 1
+        elif layer in LAYERS:
+            layer_tok[layer] += tok
+            layer_cnt[layer] += 1
+            if layer in ("identity", "behavior"):
+                resident += tok
         # 4) disabled 处置（仅 platform 级别要求）
         if level == "platform" and disabled:
             default_note = _note_of(_mini_yaml.get(d, "comment", "") or "",
@@ -259,7 +342,7 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
                 )
         # 5) narrative 过短无标题 → 警告（知识库检索命中概率低）
         if enabled and layer == "narrative" and not comment.strip() and len(content) < 40:
-            warnings.append(
+            (errors if strict else warnings).append(
                 f"lore narrative 过短无标题：{label} —— 知识库文档无 comment 且内容 < 40 字，检索命中概率低；"
                 "请补标题性 comment 或合并到相近条目"
             )
@@ -267,13 +350,15 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
         for k in keys_nonempty:
             stripped = k.strip()
             if stripped in _OVER_BROAD_REGEX or len(stripped) <= 2:
-                warnings.append(
+                (errors if strict else warnings).append(
                     f"lore keys 可能过泛：{label} —— 键 {k!r}（单字/过短/全匹配正则）；"
                     "若为专有名词可忽略，否则收紧"
                 )
         # 7) inject_at 词表（仅 compile_card 消费）
         if inject_at and inject_at not in INJECT_ATS:
-            warnings.append(f"lore inject_at 取值未知：{label} —— {inject_at!r}（应为 resident/context_head/near_input）")
+            (errors if strict else warnings).append(
+                f"lore inject_at 取值未知：{label} —— {inject_at!r}（应为 resident/context_head/near_input）"
+            )
         # 8) selective 信息（编译层归一化）
         if enabled and selective and not secondary:
             infos.append(
@@ -286,6 +371,14 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
                 f"lore 孤立条目（上游卡已删除）：{label} —— 请在 note 写处置去向（保留/丢弃/待定 + 理由）；"
                 "机器不动它，但强制人做决定"
             )
+
+    infos.append(
+        f"分层 token 统计：常驻 resident={resident}（persona={persona_tok}"
+        f" + identity={layer_tok['identity']}[{layer_cnt['identity']}条]"
+        f" + behavior={layer_tok['behavior']}[{layer_cnt['behavior']}条]）"
+        f"｜按需 narrative={layer_tok['narrative']}[{layer_cnt['narrative']}条]"
+        f"｜禁用 disabled={layer_tok['disabled']}[{layer_cnt['disabled']}条]"
+    )
 
     # 未分层检查：仅 platform 级别报错
     if level == "platform" and unlayered_groups:
@@ -307,7 +400,8 @@ def _lore_gates(asset_dir: Path, errors: list, warnings: list, infos: list,
 
 
 def validate(asset_dir: Path, budget_tokens=None, strict: bool = False,
-             level: str = "platform", report_unlayered: bool = False) -> int:
+             level: str = "platform", report_unlayered: bool = False,
+             summary: bool = False) -> int:
     errors = []
     warnings = []
     infos = []
@@ -371,22 +465,28 @@ def validate(asset_dir: Path, budget_tokens=None, strict: bool = False,
     # B) lore 路由门禁
     checked, resident = _lore_gates(asset_dir, errors, warnings, infos, budget_tokens, strict, level)
 
-    for i in infos:
-        print(f"ℹ {i}")
-    for w in warnings:
-        print(f"⚠ {w}")
+    if summary:
+        _print_grouped(infos, "ℹ")
+        _print_grouped(warnings, "⚠")
+    else:
+        for i in infos:
+            print(f"ℹ {i}")
+        for w in warnings:
+            print(f"⚠ {w}")
     if errors:
         for e in errors:
             print(f"✗ {e}")
-        # 未分层工作清单（如果有）：分组打印
-        unlayered = _collect_unlayered(asset_dir / "lore")
-        if unlayered:
-            print()
-            _print_unlayered(unlayered)
+        # 未分层工作清单（如果有）：仅 platform 级别分组打印
+        if level == "platform" and (asset_dir / "lore").is_dir():
+            unlayered = _collect_unlayered(asset_dir / "lore")
+            if unlayered:
+                print()
+                _print_unlayered(unlayered)
         return 1
 
     n_lore = len(_refs(lines, "lore_refs"))
-    print(f"✓ 资产校验通过：{asset_dir}（persona 语义补全完成、{n_lore} 个 lore 引用、"
+    level_note = "归档级结构完整" if level == "archival" else "persona 语义补全完成"
+    print(f"✓ 资产校验通过：{asset_dir}（{level_note}、{n_lore} 个 lore 引用、"
           f"lore/{checked} 个模块已检、resident_tokens 约 {resident} estimated_tokens、sha 一致"
           + ("、无警告" if not warnings else f"、{len(warnings)} 条警告")
           + (f"、{len(infos)} 条信息" if infos else "") + "）")
@@ -399,18 +499,21 @@ def main():
     ap.add_argument("--budget-tokens", type=int, default=None,
                     help="常驻预算上限（覆盖 validation.yaml；不传且无配置则跳过预算门禁）")
     ap.add_argument("--strict", action="store_true",
-                    help="把警告升级为错误（keys 过泛 / 词表外取值 / narrative 过短 / 孤立条目）")
+                    help="把警告升级为错误（keys 过泛 / 词表外取值 / narrative 过短 / 孤立条目 / persona 残留）")
     ap.add_argument("--level", choices=["archival", "platform"], default="platform",
                     help="验证级别：archival=归档级（只检查机器字段），platform=平台级（检查所有字段，默认）")
     ap.add_argument("--report-unlayered", action="store_true",
                     help="只输出未分层条目工作清单并退出 0，不做其他检查")
+    ap.add_argument("--summary", action="store_true",
+                    help="按类别折叠汇总重复的警告与信息（适合 100+ 条目的大型世界书，错误仍全量打印）")
     args = ap.parse_args()
     asset_dir = Path(args.asset_dir)
     if args.budget_tokens is None:
         # 阈值属私有仓库决策：优先资产目录 validation.yaml，工具不内置默认值
         args.budget_tokens = _asset_config(asset_dir).get("budget_tokens")
     return validate(asset_dir, budget_tokens=args.budget_tokens,
-                    strict=args.strict, level=args.level, report_unlayered=args.report_unlayered)
+                    strict=args.strict, level=args.level,
+                    report_unlayered=args.report_unlayered, summary=args.summary)
 
 
 if __name__ == "__main__":

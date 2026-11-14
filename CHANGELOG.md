@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **全量卡片与扩展脚本审计 (`list_entries.py --audit`)**: 吸收上游 `script-analysis.md` 与 `SKILL.md` 审计方法论，一步输出 `data` 顶层文本字段、开场白 HTML/`<UpdateVariable>` 注入统计、世界书统计、`extensions.tavern_helper.scripts[]` 分类（`zod_schema` / `mvu_engine` / `external_import` / `ui_or_dom` / `game_or_util`）、`extensions.regex_scripts[]` 分类（`ST_CLEANUP` / `AI_HIDE` / `PROSE_LINT` / `UI_PANEL` / `GAME_INJECT`）及多角色方案 A/B/C 选型建议。
+- **运行时排除清单自动建议 (`list_entries.py --suggest-runtime`)**: 吸收上游 `mvu-mapping.md` 反幻觉结论（严格区分 `[initvar]`/`[mvu_update]` 引擎条目与 `[mvu_plot]` 扮演规则）并结合 `_conditions.py`，只读扫描 MVU 管道、ST 前端 `<pic>`/`<selection>` 渲染模板、纯 XML 排序标牌及 `if (false)` / 反盗卡混淆死代码陷阱，直接输出可保存的 `runtime.yaml` 建议草稿。
+- **按稳定条目 ID 查看 (`get_entry.py --id`)**: 支持按 `entry.id`/`uid`（含逗号列表与区间）查询世界书全文，与 `list_entries.py` 的 `[idx | id=eid]` 标签及 `runtime.yaml` 的 `exclude_entry_ids` 直接对齐。
+- **CCv3 `.charx` 容器解包 (`extract_card.py`)**: 支持 `.charx`（ZIP 容器内嵌 `card.json`，含 `PK\x03\x04` magic bytes 兜底），并在指定输出路径时自动创建父级目录。
+- **校验器分层预算视图、残留扫描与折叠模式 (`validate_assets.py`)**:
+  - 输出 `分层 token 统计`（`persona` / `identity` / `behavior` / `narrative` / `disabled` 条目数与估算 token）；
+  - 吸收上游 `validation.md` 残留检查，扫描 `persona.yaml` 语义字段与 `dialogs/*.yaml` 中的 ST 运行时补丁标签（`<UpdateVariable>`、`{{getvar::`、`<!--AI_HIDE_` 等）；
+  - 新增可选 `--summary` 参数，按类别折叠大型世界书的重复警告与信息（错误仍全量打印，向后兼容默认输出）。
 - **`_conditions.py`（共享模块）**: 解析 EJS 条件门控（`<%_ if (getvar('X') > N) { _%> … <%_ } _%>`）
   为 `[(条件, 正文)]`。**资产层不动**（EJS 原样留卡，见 macros.py 的立场）——它供**编译层**把门控变成结构化
   元数据：ST 自己渲染 EJS 属无损路径，AstrBot 没有渲染器，不归一化就会把原始代码送进提示词。
@@ -40,9 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_validate_gates` 里靠字符串替换造空层/非法层的前置条件都失效了 —— 代码是对的、测试没跟上。
   已更新，套件恢复全绿。
 - **disabled 条目验证误报**: disabled 条目的默认 note 改为空字符串，避免被验证脚本误判为"机器默认值"
-- **Windows 中文乱码**: 所有 Python 脚本强制 UTF-8 输出，无需手动设置 `PYTHONIOENCODING`
+- **Windows 中文乱码**: 所有 Python 脚本（含 `extract_card.py`、`list_entries.py`、`get_entry.py`、`compile_card.py`、`replay_hitrate.py`）统一强制 UTF-8 输出，无需手动设置 `PYTHONIOENCODING`
+- **`migrate_lorebook` 空层引用隐患与重名去重 (`build_assets.py`)**: 修复 `--migrate` 遇到首条 `layer` 为空或 `note` 为 `None` 时提前引用未赋值 `key_name` 的 `UnboundLocalError` 隐患，并为迁移阶段新增条目补齐同名 `_2/_3` 后缀去重。
+- **`infer_layers.py` 解析与双份词表失步**: 移除手工逐行匹配 `'_derived:'` 的失效判断与重复词表，改为调用 `_mini_yaml.parse` 与 `build_assets.infer_layer` 单一权威实现。
+- **`validate_assets.py --strict` 升级一致性与空世界书预算门禁**: 修复 `--strict` 此前仅升级孤立条目警告的问题（现统一升级全部警告项），并修复无 `lore/` 目录时漏检 `persona` 常驻预算的分支。
 
 ### Changed
+- **卡片中性的 `infer_layer` 与可读模块命名 (`build_assets.py`)**: 移除特定卡片角色名硬编码，改为基于 `constant + 角色名/单键` 识别核心档案，`[mvu_plot]` 仅在 `constant=true` 时归入 `behavior`，避免大型多角色卡的非常驻 NPC 档案虚增 `resident_tokens`；当首键为 `$$_NO_TRIGGER_$$`、正则元字符或单字多语种泛匹配组时自动回退至可读 `comment` 命名。
 - **layer 字段不再留空**: `build_assets.py` 首次生成时自动推断 layer，不再输出 `layer: ""`
 - **--migrate 保留已有 layer**: 迁移模式下保留人工填写的 layer，只对空值进行推断
 

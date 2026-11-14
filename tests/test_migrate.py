@@ -26,7 +26,7 @@ import _mini_yaml  # noqa: E402  # 工具族共享解析器
 
 def _run(*args):
     return subprocess.run([sys.executable, str(SCRIPTS / args[0]), *args[1:]],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def _sha256(path: Path) -> str:

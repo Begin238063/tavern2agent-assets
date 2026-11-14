@@ -2,10 +2,11 @@
 """从 SillyTavern 角色卡中提取内置 JSON。
 
 支持格式：
-  PNG  — tEXt / iTXt / zTXt 块
-  WEBP — RIFF / EXIF / XMP，未识别时回退到原始字节扫描
-  JPEG — EXIF / XMP / COM 标记，未识别时回退到原始字节扫描
-  JSON — 直接读取
+  PNG   — tEXt / iTXt / zTXt 块
+  WEBP  — RIFF / EXIF / XMP，未识别时回退到原始字节扫描
+  JPEG  — EXIF / XMP / COM 标记，未识别时回退到原始字节扫描
+  CHARX — CCv3 ZIP 容器（读取内置 card.json）
+  JSON  — 直接读取
 
 支持卡片规范：V1（平铺）/ V2（chara_card_v2，data 嵌套）/ V3（chara_card_v3 / ccv3）。
 
@@ -19,11 +20,18 @@ Usage:
 """
 
 import base64
+import io
 import json
 import struct
 import sys
+import zipfile
 import zlib
 from pathlib import Path
+
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 
 # ─── PNG ────────────────────────────────────────────────────────
@@ -218,6 +226,25 @@ def _normalize_v1(card: dict) -> dict:
     }
 
 
+# ─── CHARX（CCv3 ZIP 容器）─────────────────────────────────────
+
+def _from_charx(raw: bytes) -> dict:
+    """从 CCv3 .charx（ZIP 归档）中读取根级或嵌套的 card.json。"""
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        names = zf.namelist()
+        target = None
+        if "card.json" in names:
+            target = "card.json"
+        else:
+            for name in names:
+                if name.endswith("/card.json"):
+                    target = name
+                    break
+        if not target:
+            raise ValueError("CHARX 归档中未找到 card.json")
+        return json.loads(zf.read(target).decode("utf-8-sig"))
+
+
 # ─── 入口 ───────────────────────────────────────────────────────
 
 def extract_card(path: str) -> dict:
@@ -234,6 +261,7 @@ def extract_card(path: str) -> dict:
         ".webp": _from_webp,
         ".jpg": _from_jpeg,
         ".jpeg": _from_jpeg,
+        ".charx": _from_charx,
         ".json": _from_json,
     }
     if ext in dispatch:
@@ -246,6 +274,8 @@ def extract_card(path: str) -> dict:
         return _normalize_v1(_from_webp(raw))
     if raw[:2] == b"\xff\xd8":
         return _normalize_v1(_from_jpeg(raw))
+    if raw[:4] == b"PK\x03\x04":
+        return _normalize_v1(_from_charx(raw))
     if raw.lstrip()[:1] == b"{":
         return _normalize_v1(_from_json(raw))
     raise ValueError(f"无法识别文件格式: {path}")
@@ -260,11 +290,13 @@ def main():
     out_path = sys.argv[2] if len(sys.argv) > 2 else None
 
     card = extract_card(in_path)
-    # 记录原始卡文件名（PNG/JSON），供 build_assets 的 provenance 追溯；不改卡片语义
+    # 记录原始卡文件名（PNG/CHARX/JSON），供 build_assets 的 provenance 追溯；不改卡片语义
     card["_source_file"] = Path(in_path).name
 
     if out_path:
-        with open(out_path, "w", encoding="utf-8") as f:
+        out_p = Path(out_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_p, "w", encoding="utf-8") as f:
             json.dump(card, f, ensure_ascii=False, indent=2)
         print(f"Saved to {out_path}")
     else:

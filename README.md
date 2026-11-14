@@ -1,13 +1,13 @@
 # tavern2agent-assets
 
-> **本仓库是 [tavern2agent](https://github.com/Xerxes-2/tavern2agent)（Xerxes-2）的 fork**，只保留「解包 + 审计 + 资产骨架生成」能力，把 SillyTavern 角色卡（PNG/WEBP/JPEG/JSON）提取为**平台无关的角色资产**，供任意聊天平台（AstrBot、SillyTavern、Open WebUI 等）的渲染器消费。
+> **本仓库是 [tavern2agent](https://github.com/Xerxes-2/tavern2agent)（Xerxes-2）的 fork**，只保留「解包 + 审计 + 资产骨架生成」能力，把 SillyTavern 角色卡（PNG/WEBP/JPEG/CHARX/JSON）提取为**平台无关的角色资产**，供任意聊天平台（AstrBot、SillyTavern、Open WebUI 等）的渲染器消费。
 > **本 fork 不生成任何运行时工程**（无 pi 工程 / extension.ts / start.sh）；如需 pi 运行时转换，请使用上游 tavern2agent。
 
 ## 与上游的关系
 
-- 保留：`scripts/extract_card.py`、`list_entries.py`、`get_entry.py`（均源自上游：`get_entry.py` 与上游逐字节相同，`extract_card.py` 增加 `_source_file`、`list_entries.py` 增加 `--stats`）；解包/审计/字段审计方法论改写为「资产化」语境。
-- 新增：`scripts/build_assets.py`（资产骨架生成器，支持 `--migrate` 字段级合并）、`scripts/validate_assets.py`（资产校验器，persona 完整性 + lore 可用性门禁）、`scripts/replay_hitrate.py`（keys 命中率回放）、`assets_schema/`（字段规范与示例）。
-- 删除：上游的 pi 运行时相关全部内容（references/、docs/、start.sh、decision gate、event packs 等）。
+- 保留并增强：`scripts/extract_card.py`（增加 `_source_file`、CCv3 `.charx` 解包与自动建目录）、`list_entries.py`（增加 `--stats`、`--audit` 全量字段与扩展脚本分类审计、`--suggest-runtime` 运行时排除清单生成）、`get_entry.py`（增加 `--id` 按稳定条目 ID 查询）；解包/审计/字段审计方法论改写为「资产化」语境。
+- 新增：`scripts/build_assets.py`（资产骨架生成器，支持 `--migrate` 字段级合并与 `runtime.yaml` 排除）、`scripts/validate_assets.py`（资产校验器，persona 完整性 + lore 路由门禁 + 分层 token 统计 + ST 残留扫描）、`scripts/replay_hitrate.py`（keys 命中率回放）、`scripts/_conditions.py`（EJS 条件门控解析）、`assets_schema/`（字段规范与示例）。
+- 删除：上游的 pi 运行时相关全部内容（pi 专属 references/、start.sh、decision gate、event packs 等）。
 
 ### 同步策略：不做同步（与上游无共同祖先）
 
@@ -22,7 +22,7 @@
   ```
 
   `get_entry.py` 与上游逐字节相同，修复可直接搬；`extract_card.py` 只多 `_source_file`，差异极小；`list_entries.py` 因本仓新增 `--stats` 已有分叉，需挑着看。
-- **上游是否还有本仓缺的东西**（2026-09-17 核对）：上游对上述脚本的最后两次改动是「自动归一化 v1 卡为 v2 schema」与「支持 PNG/WEBP/JPEG/JSON 四格式」，**均已在副本中**；上游近期活动（2026-07-08 结构重命名、07-11 英文 README）都在 `docs/` 与 `SKILL.md`，未触及 `scripts/`；上游整仓自 `2026-07-11` 未再提交。
+- **上游是否还有本仓缺的东西**（2026-11-14 复核）：上游整仓自 `2026-07-11`（`601b1c3`）未再提交，`scripts/` 自 fork 以来无新增改动；上游文档层沉淀的三项方法论（`mvu-mapping.md` 对 `[initvar]`/`[mvu_update]` 与 `[mvu_plot]` 的反幻觉区分、`script-analysis.md` 对 `tavern_helper.scripts` / `regex_scripts` 的分类审计、`validation.md` 的 ST 补丁残留扫描）均已内化进本仓 `list_entries.py`、`build_assets.py` 与 `validate_assets.py`。
 - **无法向上游提 PR**：无共同祖先 ⇒ GitHub 形成不了可合并的 PR。若要把改动回馈上游，需基于上游历史另建分支打 patch。
 
 ## 下游项目
@@ -33,9 +33,9 @@
 ### 兼容性约定
 
 修改以下脚本的参数或输出格式时，需通知下游项目更新调用代码：
-- `extract_card.py`
+- `extract_card.py`（已向后兼容支持 `.charx` 输入与自动创建父目录，2026-11-14）
 - `build_assets.py`
-- `validate_assets.py`（已新增 `--level` 参数，2026-09-07）
+- `validate_assets.py`（已新增可选 `--level` 参数，2026-09-07；新增可选 `--summary` 参数，2026-11-14，默认输出兼容）
 - `compile_card.py`
 - `replay_hitrate.py`
 
@@ -49,12 +49,13 @@
 ### 基础流程
 
 ```bash
-python3 scripts/extract_card.py card.png cards/<角色名>/card.json   # ① 解包并归档
-python3 scripts/list_entries.py cards/<角色名>/card.json            # ② 世界书审计（可选 --filter mvu / initvar）
-python3 scripts/get_entry.py cards/<角色名>/card.json 3             # ② 读单条全文
-python3 scripts/build_assets.py --card cards/<角色名>/card.json --out characters/  # ③ 生成资产骨架（幂等）
+python3 scripts/extract_card.py card.png cards/<角色名>/card.json   # ① 解包并归档（支持 PNG/WEBP/JPEG/CHARX/JSON）
+python3 scripts/list_entries.py cards/<角色名>/card.json --audit    # ② 全量审计（data 字段 + 世界书 + TH/正则脚本 + 方案建议）
+python3 scripts/list_entries.py cards/<角色名>/card.json --suggest-runtime  # ② 扫描 ST 纯运行时管道，输出 runtime.yaml 建议清单
+python3 scripts/get_entry.py cards/<角色名>/card.json --id 433      # ② 按条目稳定 id（或数组下标）读单条全文
+python3 scripts/build_assets.py --card cards/<角色名>/card.json --out characters/  # ③ 生成资产骨架（幂等，自动读取同目录 runtime.yaml）
 python3 scripts/build_assets.py --card <新卡> --out characters/ --migrate          # ③ 卡更新：字段级合并（机器字段刷新、人工字段保留）
-python3 scripts/validate_assets.py characters/<角色名>/             # ④ 完整性与可用性门禁（通过后才能提交；预算等阈值读资产目录 validation.yaml）
+python3 scripts/validate_assets.py characters/<角色名>/ --summary   # ④ 完整性与可用性门禁（--summary 折叠大型卡警告，展示分层 token 统计）
 python3 scripts/replay_hitrate.py --lore characters/<角色名>/lore --chats 聊天记录.txt  # ⑤ keys 命中率回放（scan_depth 滑窗 + p50/p90/p99）
 python3 scripts/compile_card.py --assets characters/<角色名>/ --out out/card.json --resolve-refs  # ⑥（可选逃生口）编译回 ST 卡
 ```
@@ -94,13 +95,16 @@ python3 scripts/validate_assets.py characters/<角色名>/ --level platform
 ```txt
 SKILL.md                       # agent 入口流程（资产化）
 scripts/
-├── extract_card.py            # 解包（上游原样）
-├── list_entries.py            # 世界书审计（上游原样）
-├── get_entry.py               # 条目查看（上游原样）
-├── build_assets.py            # 资产骨架生成器（纯标准库、幂等；--migrate 字段级合并）
-├── validate_assets.py         # 资产校验器（persona 完整性 + lore 可用性门禁）
+├── extract_card.py            # 解包（支持 PNG/WEBP/JPEG/CHARX/JSON，自动建父目录）
+├── list_entries.py            # 卡片与世界书审计（支持 --audit / --suggest-runtime / --stats）
+├── get_entry.py               # 条目查看（支持按下标或 --id 查询）
+├── build_assets.py            # 资产骨架生成器（纯标准库、幂等；--migrate 字段级合并；支持 runtime.yaml）
+├── infer_layers.py            # 批量推断空 layer（复用 build_assets.infer_layer）
+├── mark_disabled.py           # 批量标记 disabled 条目默认处置说明
+├── validate_assets.py         # 资产校验器（persona 完整性 + lore 路由门禁 + 分层 token 统计 + --summary）
 ├── replay_hitrate.py          # keys 命中率回放（真实聊天历史，滑窗 + p50/p90/p99）
-├── compile_card.py            # 资产 → ST 卡编译器（selective 归一化 + 跨资产 refs 解析）
+├── compile_card.py            # 资产 → ST 卡编译器（selective 归一化 + 跨资产 refs 解析 + 死条目检查）
+├── _conditions.py             # EJS 条件门控解析器（纯标准库）
 └── _mini_yaml.py              # 工具族共享的极简 YAML 解析器（纯标准库）
 assets_schema/
 ├── persona.schema.yaml        # persona.yaml 字段规范
@@ -108,11 +112,11 @@ assets_schema/
 ├── dialogs.schema.yaml        # dialogs/*.yaml 字段规范
 └── persona.example.yaml       # 完整示例（Bot）
 cards/<角色名>/                # 原始 card.json 归档（只读源，随 git 版本化）
-└── card.json
+├── card.json
+└── runtime.yaml               # 可选：卡侧纯 ST 运行时管道排除清单
 characters/<角色名>/           # 产物（--out 默认 characters/）
 ├── persona.yaml
 ├── validation.yaml            # 私有仓库持有：阈值/默认动作（budget_tokens / default_window），工具不内置
-├── lore/*.yaml                # 机器字段 _derived 块 + 人工字段（keys/note/layer/budget_tokens；layer 承重）
 ├── lore/*.yaml                # _derived 块=机器字段（激活语义/内容/comment/sha）；块外 keys/note/layer/budget_tokens=人工字段
 ├── dialogs/                   # first_mes.yaml / alternate_NN.yaml / example_NN.yaml
 └── provenance.md

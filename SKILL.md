@@ -1,6 +1,6 @@
 ---
 name: tavern2agent-assets
-description: 用户提供 SillyTavern 角色卡（PNG/JSON）并要求提取、资产化、转成平台无关角色资产时使用；产出角色资产骨架（persona/lore/dialogs/provenance），供任意聊天平台的渲染器消费。
+description: 用户提供 SillyTavern 角色卡（PNG/WEBP/JPEG/CHARX/JSON）并要求提取、资产化、转成平台无关角色资产时使用；产出角色资产骨架（persona/lore/dialogs/provenance），供任意聊天平台的渲染器消费。
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 > **重要声明**：本 skill 只产出平台无关的角色资产，**不生成任何运行时工程**；如需 pi 运行时转换，请使用上游 tavern2agent。
 
-本 skill 是上游 tavern2agent 的 fork：只保留「解包 + 审计 + 资产骨架生成」能力。它把 SillyTavern 角色卡（PNG/WEBP/JPEG/JSON）提取为可版本化、可复用、跨平台的角色资产库，供 AstrBot、SillyTavern、Open WebUI 等任意聊天平台的未来渲染器消费。资产库中的任何文件都不含平台专属概念（pi、extension.ts、pi session、subagent、prompt orchestrator、start.sh 等）。
+本 skill 是上游 tavern2agent 的 fork：只保留「解包 + 审计 + 资产骨架生成」能力。它把 SillyTavern 角色卡（PNG/WEBP/JPEG/CHARX/JSON）提取为可版本化、可复用、跨平台的角色资产库，供 AstrBot、SillyTavern、Open WebUI 等任意聊天平台的未来渲染器消费。资产库中的任何文件都不含平台专属概念（pi、extension.ts、pi session、subagent、prompt orchestrator、start.sh 等）。
 
 ## 核心原则
 
@@ -23,33 +23,36 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 ### ① 收卡
 
-用户提供角色卡文件（PNG / WEBP / JPEG / JSON）。确认输出目录；目录存在时先问：覆盖、增量、另建。
+用户提供角色卡文件（PNG / WEBP / JPEG / CHARX / JSON）。确认输出目录；目录存在时先问：覆盖、增量、另建。
 
 ### ② 解包与归档
 
 ```bash
-python3 scripts/extract_card.py <card.png|webp|jpg|json> cards/<角色名>/card.json
+python3 scripts/extract_card.py <card.png|webp|jpg|charx|json> cards/<角色名>/card.json
 ```
 
-得到 card.json（原始结构化字段，含 spec + data；v1 已归一化为 v2，带 `_normalized_from_v1` 标记）。
+得到 card.json（自动创建父目录；原始结构化字段含 spec + data；v1 已归一化为 v2，带 `_normalized_from_v1` 标记）。
 
 **card.json 归档位置（P1-2）**：原始 JSON 一律归档到 `cards/<角色名>/card.json`，不散落工作目录。该目录只读源、随 git 版本化；后续 re-extract 可覆盖 card.json，但 sha256 由 provenance.md 记录，用于追溯每次资产化对应的卡版本。
 
-### ③ 世界书审计
+### ③ 世界书与扩展脚本审计
 
 ```bash
-python3 scripts/list_entries.py cards/<角色名>/card.json                  # 全部条目概览
+python3 scripts/list_entries.py cards/<角色名>/card.json --audit           # 推荐首选：全量审计（data 顶层字段 + 世界书统计 + TH/正则脚本分类 + 方案 A/B/C 建议）
+python3 scripts/list_entries.py cards/<角色名>/card.json --suggest-runtime # 扫描纯 ST 运行时管道/XML 标牌/死代码陷阱，输出 runtime.yaml 建议清单（只读）
+python3 scripts/list_entries.py cards/<角色名>/card.json                  # 全部条目概览（同时显示 [idx | id=eid]）
 python3 scripts/list_entries.py cards/<角色名>/card.json --filter mvu     # 只看 [mvu]/[mvu_update] 标记条目
 python3 scripts/list_entries.py cards/<角色名>/card.json --filter initvar # 只看 [initvar] 条目
-python3 scripts/list_entries.py cards/<角色名>/card.json --stats          # 一键统计：类型×标记×角色条目数
-python3 scripts/get_entry.py cards/<角色名>/card.json <index>             # 读单条全文
+python3 scripts/list_entries.py cards/<角色名>/card.json --stats          # 一键统计：类型×标记×角色条目×扩展脚本数
+python3 scripts/get_entry.py cards/<角色名>/card.json <index>             # 按数组下标读全文
+python3 scripts/get_entry.py cards/<角色名>/card.json --id <eid>          # 按条目稳定 id/uid 读全文（与 runtime.yaml 对齐）
 ```
 
 审计要点：
 
-- 条目计数：共多少条世界书条目；大型卡直接用 `--stats` 拿类型×标记×角色条目数统计。
-- **v3 卡注意**：条目常无 `keys` 字段（list_entries 显示的「key」实为 comment）；build_assets 已支持 keys 为空回退 comment 命名，产出文件名可读（如 `Bot.yaml`），不会退化成 `entry_NN.yaml`。**keys 只对 ST 运行时有意义**——它不属于资产路由（路由由 layer 决定），compile_card.py 编 ST 卡时做可达性检查（启用+非常驻+keys 空 = 死条目），validate 不检查 keys。
-- 标记识别：[mvu] / [mvu_update] / [mvu_plot] / [initvar] 条目，这些标记在资产化时写入 lore 模块的 note。
+- 全量视角：用 `--audit` 一次看清 `data` 顶层文本字段、开场白 HTML/`<UpdateVariable>` 注入、`extensions.tavern_helper.scripts[]`（Zod 变量 schema / MVU 引擎 / 前端面板）与 `extensions.regex_scripts[]`（`ST_CLEANUP` / `AI_HIDE` / `PROSE_LINT` 杀八股禁词 / `UI_PANEL`）。
+- **v3 卡注意**：条目常无 `keys` 字段，或首键为正则元字符/`$$_NO_TRIGGER_$$`/单字泛匹配假名；`build_assets.py` 会自动回退到可读 `comment` 命名，不会退化成乱码或 `entry_NN.yaml`。**keys 只对 ST 运行时有意义**——它不属于资产路由（路由由 layer 决定），`compile_card.py` 编 ST 卡时做可达性检查（启用+非常驻+keys 空 = 死条目），validate 不检查 keys。
+- **MVU 标记反幻觉（吸收上游 mvu-mapping）**：只有 `[initvar]` 与 `[mvu_update]` 属于真正的 MVU 变量引擎条目；**`[mvu_plot]` 并非引擎条目**，卡作者常把它挂在核心扮演准则或正文剧情设定上，必须看清内容再决定是进资产层还是进 `runtime.yaml`。
 - disabled 条目：不能默认丢弃（可能是 DLC、路线、草稿规则），逐条决定去向。
 - 多角色 / 世界观卡：先按「多角色 / 世界观卡（方案 A / B / C）」章节判断类型，再决定怎么资产化。
 
@@ -107,6 +110,7 @@ python3 scripts/build_assets.py --card cards/<角色名>/card.json --out charact
 
 ```bash
 python3 scripts/validate_assets.py characters/<角色名>/                                   # layer 路由门禁 + 完整性与可用性
+python3 scripts/validate_assets.py characters/<角色名>/ --summary                         # 大型世界书推荐：按类别折叠重复警告/信息，展示分层 token 统计
 python3 scripts/validate_assets.py characters/<角色名>/ --budget-tokens 16384             # 覆盖 validation.yaml 的预算（阈值归私有仓库，工具不内置默认）
 python3 scripts/validate_assets.py characters/<角色名>/ --strict                          # 把警告升级为错误
 python3 scripts/validate_assets.py characters/<角色名>/ --report-unlayered                # 只输出未分层条目工作清单（分批分层用）

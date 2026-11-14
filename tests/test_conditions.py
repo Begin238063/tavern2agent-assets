@@ -50,6 +50,22 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(pairs[0], ("c > 1", "甲"))
         self.assertEqual(pairs[1], ("not(c > 1) and c > 2", "乙"))
 
+    def test_多分支_else_if_else链累积取反(self):
+        pairs, _ = _pairs(
+            "<%_ if (getvar('c') > 30) { _%>甲"
+            "<%_ } else if (getvar('c') > 20) { _%>乙"
+            "<%_ } else if (getvar('c') > 10) { _%>丙"
+            "<%_ } else { _%>丁<%_ } _%>")
+        self.assertEqual(
+            pairs,
+            [
+                ("c > 30", "甲"),
+                ("not(c > 30) and c > 20", "乙"),
+                ("not(c > 30) and not(c > 20) and c > 10", "丙"),
+                ("not(c > 30) and not(c > 20) and not(c > 10)", "丁"),
+            ],
+        )
+
     def test_嵌套合取(self):
         pairs, _ = _pairs(
             "<%_ if (getvar('a') > 1) { _%>"
@@ -97,10 +113,11 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(sum(rep.code_tags.values()), 1)
 
     def test_一行闭多层(self):
-        pairs, _ = _pairs(
+        pairs, rep = _pairs(
             "<%_ if (getvar('a') > 1) { _%>"
-            "<%_ if (getvar('b') > 2) { _%>内<%_ } } _%>")
-        self.assertEqual([c for c, _ in pairs], ["a > 1 and b > 2"])
+            "<%_ if (getvar('b') > 2) { _%>内<%_ } } _%>外")
+        self.assertEqual(pairs, [("a > 1 and b > 2", "内"), (None, "外")])
+        self.assertTrue(rep.clean)
 
     def test_纯注释标签按代码消费并报告(self):
         pairs, rep = _pairs("<%_ //注意，勿手动开启此条目 _%>正文")
